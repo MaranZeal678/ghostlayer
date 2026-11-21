@@ -119,7 +119,7 @@ export function FindingView({ finding, evidence, repair: initialRepair, repoConn
             <ol className="space-y-1.5">
               {(repro.human ?? []).map((s: string, i: number) => (
                 <li key={i} className="flex gap-3 text-sm">
-                  <span className="font-mono text-faint">{String(i + 1).padStart(2, "0")}</span> {s}
+                  <span className="font-mono text-faint">{String(i + 1).padStart(2, "0")}</span> {s.replace(/^\s*\d+[.)]\s*/, "")}
                 </li>
               ))}
             </ol>

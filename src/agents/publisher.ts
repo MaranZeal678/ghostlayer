@@ -133,7 +133,7 @@ ${f.description}
 GhostLayer's Explorer agent navigated the deployed site in a Solari cloud browser with **no list of known bugs**, exercising user journeys the way a real user would. A rapid-repeated-activation probe produced an anomalous network pattern, which the Investigator agent then replayed in fresh, isolated browser contexts: **${stats?.triggerFailures ?? "?"}/${stats?.triggerRuns ?? "?"} trigger runs failed**, **${(stats?.controlRuns ?? 0) - (stats?.controlFailures ?? 0)}/${stats?.controlRuns ?? 0} normal (control) runs behaved correctly**.
 
 ### Reproduction steps
-${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+${steps.map((s, i) => `${i + 1}. ${s.replace(/^\s*\d+[.)]\s*/, "")}`).join("\n")}
 
 **Expected:** ${f.expectedBehavior}
 **Actual:** ${f.actualBehavior}
