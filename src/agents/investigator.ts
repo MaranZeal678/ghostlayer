@@ -13,6 +13,7 @@ export interface ReproRun {
   variant: "trigger" | "control";
   attempt: number;
   failed: boolean;
+  inconclusive?: boolean;
   detail: string;
   mutations: string[];
   screenshotId?: string;
@@ -97,14 +98,21 @@ export async function reproduce(
   let attemptC = 0;
   for (const p of plan) {
     const attempt = p.variant === "trigger" ? ++attemptT : ++attemptC;
-    const { obs, shot, preError } = await replayOnce(session, origin, anomaly.trail, p.step);
+    // A journey that could not be completed is not evidence either way: retry once, then mark inconclusive.
+    let r = await replayOnce(session, origin, anomaly.trail, p.step);
+    if (r.preError || r.obs.error) r = await replayOnce(session, origin, anomaly.trail, p.step);
+    const { obs, shot, preError } = r;
+    const inconclusive = Boolean(preError || obs.error);
     let { failed, detail } = exhibits(anomaly.kind, obs);
     if (p.variant === "control" && anomaly.kind === "duplicate_mutation") {
       // A healthy control submits exactly once.
       failed = obs.mutations.length !== 1;
       detail = `${obs.mutations.length} mutation request(s) from a single click`;
     }
-    if (preError) detail += ` (trail warning: ${preError.slice(0, 80)})`;
+    if (inconclusive) {
+      failed = false;
+      detail = `inconclusive — journey did not complete (${(preError ?? obs.error ?? "").slice(0, 80)})`;
+    }
     const screenshotId = shot
       ? await opts.saveScreenshot(`${p.variant === "trigger" ? "Reproduction" : "Control"} #${attempt}: ${describeStep(p.step)}`, shot)
       : undefined;
@@ -112,6 +120,7 @@ export async function reproduce(
       variant: p.variant,
       attempt,
       failed,
+      inconclusive,
       detail,
       mutations: obs.mutations.map((m) => `${m.method} ${m.path} → ${m.status ?? m.failed ?? "pending"}`),
       screenshotId,
@@ -121,8 +130,11 @@ export async function reproduce(
   }
   const triggerFailures = runs.filter((r) => r.variant === "trigger" && r.failed).length;
   const controlFailures = runs.filter((r) => r.variant === "control" && r.failed).length;
+  const triggerConclusive = runs.filter((r) => r.variant === "trigger" && !r.inconclusive).length;
+  const controlConclusive = runs.filter((r) => r.variant === "control" && !r.inconclusive).length;
   let confidence: FindingConfidence = "SUSPECTED";
-  if (triggerFailures === triggerRuns && controlFailures === 0) confidence = anomaly.kind === "unresponsive_control" ? "NEEDS_REVIEW" : "CONFIRMED";
+  if (triggerConclusive >= 2 && triggerFailures === triggerConclusive && controlFailures === 0 && (controlRuns === 0 || controlConclusive >= 1))
+    confidence = anomaly.kind === "unresponsive_control" ? "NEEDS_REVIEW" : "CONFIRMED";
   else if (triggerFailures >= Math.ceil(triggerRuns / 2)) confidence = "REPRODUCED";
   return { runs, triggerRuns, triggerFailures, controlRuns, controlFailures, confidence };
 }
