@@ -1,0 +1,360 @@
+// GhostLayer data model.
+// Clerk is the source of truth for identity; every user-owned row hangs off User.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum ScanStatus {
+  QUEUED
+  INITIALIZING
+  EXPLORING
+  INVESTIGATING
+  COMPLETED
+  PARTIALLY_COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentType {
+  EXPLORER
+  INVESTIGATOR
+  ENGINEER
+  VERIFIER
+  PUBLISHER
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum FindingConfidence {
+  SUSPECTED
+  REPRODUCED
+  CONFIRMED
+  NEEDS_REVIEW
+}
+
+enum RepairStatus {
+  QUEUED
+  PREPARING
+  DIAGNOSING
+  PATCHING
+  TESTING
+  VERIFYING
+  READY_FOR_REVIEW
+  PUBLISHING
+  PR_CREATED
+  REJECTED
+  FAILED
+  CANCELLED
+}
+
+enum PullRequestStatus {
+  DRAFT
+  OPEN
+  MERGED
+  CLOSED
+}
+
+enum JobKind {
+  SCAN // Explorer
+  INVESTIGATE // Investigator (signals persisted on Scan.signals)
+  REPAIR // Engineer (one attempt)
+  VERIFY // Verifier (one attempt)
+  PUBLISH
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum EvidenceType {
+  SCREENSHOT
+  LOG
+  TRACE
+  REPLAY
+  DIFF
+  TEST_OUTPUT
+}
+
+model User {
+  id          String   @id @default(cuid())
+  clerkUserId String   @unique
+  email       String?
+  displayName String?
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  projects    Project[]
+  connections GitHubConnection[]
+}
+
+model GitHubConnection {
+  id                      String           @id @default(cuid())
+  userId                  String
+  user                    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  githubAccountId         String?
+  githubLogin             String
+  installationId          BigInt
+  installationAccountType String
+  status                  ConnectionStatus @default(ACTIVE)
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  @@unique([userId, installationId])
+  @@index([installationId])
+}
+
+model Project {
+  id                   String        @id @default(cuid())
+  userId               String
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                 String
+  description          String?
+  websiteUrl           String
+  authorizedAt         DateTime?
+  repositoryId         BigInt?
+  repositoryOwner      String?
+  repositoryName       String?
+  repositoryFullName   String?
+  defaultBranch        String?
+  githubInstallationId BigInt?
+  maxActions           Int           @default(40)
+  status               ProjectStatus @default(ACTIVE)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  scans        Scan[]
+  findings     Finding[]
+  repairs      RepairAttempt[]
+  pullRequests PullRequest[]
+
+  @@index([userId, status])
+}
+
+model Scan {
+  id                 String     @id @default(cuid())
+  projectId          String
+  project            Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status             ScanStatus @default(QUEUED)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  pagesExplored      Int        @default(0)
+  interactionsTested Int        @default(0)
+  findingsCount      Int        @default(0)
+  executionSummary   String?
+  errorMessage       String?
+  graph              Json?
+  signals            Json?
+  createdAt          DateTime   @default(now())
+
+  agentRuns AgentRun[]
+  events    AgentEvent[]
+  findings  Finding[]
+  evidence  EvidenceArtifact[]
+
+  @@index([projectId, createdAt])
+}
+
+model AgentRun {
+  id                  String         @id @default(cuid())
+  scanId              String?
+  scan                Scan?          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  repairAttemptId     String?
+  repairAttempt       RepairAttempt? @relation(fields: [repairAttemptId], references: [id], onDelete: Cascade)
+  agentType           AgentType
+  status              AgentRunStatus @default(QUEUED)
+  startedAt           DateTime?
+  completedAt         DateTime?
+  taskDescription     String
+  outputSummary       String?
+  errorMessage        String?
+  externalExecutionId String?
+
+  events AgentEvent[]
+
+  @@index([scanId])
+  @@index([repairAttemptId])
+}
+
+model AgentEvent {
+  id                BigInt         @id @default(autoincrement())
+  scanId            String?
+  scan              Scan?          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  repairAttemptId   String?
+  repairAttempt     RepairAttempt? @relation(fields: [repairAttemptId], references: [id], onDelete: Cascade)
+  agentRunId        String?
+  agentRun          AgentRun?      @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  agentType         AgentType?
+  eventType         String
+  timestamp         DateTime       @default(now())
+  message           String
+  structuredPayload Json?
+
+  @@index([scanId, id])
+  @@index([repairAttemptId, id])
+}
+
+model Finding {
+  id                 String            @id @default(cuid())
+  scanId             String
+  scan               Scan              @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  projectId          String
+  project            Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fingerprint        String
+  title              String
+  description        String
+  severity           Severity
+  confidence         FindingConfidence
+  category           String
+  affectedUrl        String
+  reproductionSteps  Json
+  expectedBehavior   String
+  actualBehavior     String
+  evidenceReferences Json?
+  reproductionStats  Json?
+  verificationStatus String            @default("UNVERIFIED")
+  createdAt          DateTime          @default(now())
+
+  repairs  RepairAttempt[]
+  evidence EvidenceArtifact[]
+
+  @@unique([scanId, fingerprint])
+  @@index([projectId, createdAt])
+}
+
+model RepairAttempt {
+  id            String       @id @default(cuid())
+  findingId     String
+  finding       Finding      @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  projectId     String
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status        RepairStatus @default(QUEUED)
+  baseSha       String?
+  branchName    String?
+  commitSha     String?
+  rootCause     String?
+  patchSummary  String?
+  diff          String?
+  files         Json?
+  testSummary   Json?
+  errorMessage  String?
+  attempt       Int          @default(1)
+  meta          Json?
+  createdAt     DateTime     @default(now())
+  completedAt   DateTime?
+
+  verification VerificationResult?
+  pullRequest  PullRequest?
+  agentRuns    AgentRun[]
+  events       AgentEvent[]
+  evidence     EvidenceArtifact[]
+
+  @@index([findingId])
+  @@index([projectId, createdAt])
+}
+
+model VerificationResult {
+  id                        String        @id @default(cuid())
+  repairAttemptId           String        @unique
+  repairAttempt             RepairAttempt @relation(fields: [repairAttemptId], references: [id], onDelete: Cascade)
+  buildPassed               Boolean?
+  existingTestsPassed       Boolean?
+  originalFailureReproduced Boolean?
+  patchedFlowPassed         Boolean?
+  regressionTestsPassed     Boolean?
+  humanReviewRequired       Boolean       @default(true)
+  approved                  Boolean       @default(false)
+  verifierSummary           String
+  checks                    Json?
+  evidenceReferences        Json?
+  completedAt               DateTime      @default(now())
+}
+
+model PullRequest {
+  id              String            @id @default(cuid())
+  repairAttemptId String            @unique
+  repairAttempt   RepairAttempt     @relation(fields: [repairAttemptId], references: [id], onDelete: Cascade)
+  projectId       String
+  project         Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  githubNumber    Int
+  githubUrl       String
+  branchName      String
+  title           String
+  status          PullRequestStatus @default(DRAFT)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([projectId])
+}
+
+model EvidenceArtifact {
+  id              String         @id @default(cuid())
+  scanId          String?
+  scan            Scan?          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  findingId       String?
+  finding         Finding?       @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  repairAttemptId String?
+  repairAttempt   RepairAttempt? @relation(fields: [repairAttemptId], references: [id], onDelete: Cascade)
+  type            EvidenceType
+  label           String
+  mimeType        String?
+  // Small artifacts (compressed screenshots, sanitized logs) are stored inline for the MVP;
+  // storageReference points at external storage when content is null.
+  content         Bytes?
+  storageReference String?
+  createdAt       DateTime       @default(now())
+
+  @@index([scanId])
+  @@index([findingId])
+}
+
+// Durable Postgres-backed job queue consumed by the worker process (SELECT ... FOR UPDATE SKIP LOCKED).
+model Job {
+  id             String    @id @default(cuid())
+  kind           JobKind
+  status         JobStatus @default(QUEUED)
+  targetId       String
+  idempotencyKey String    @unique
+  attempts       Int       @default(0)
+  lastError      String?
+  runAfter       DateTime  @default(now())
+  lockedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAfter])
+}

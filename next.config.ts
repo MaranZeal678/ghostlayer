@@ -1,9 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  serverExternalPackages: ["playwright-core", "@solarisdk/browser", "@solarisdk/sandbox", "pg"],
   turbopack: {
     rules: {
       "*.css": {
