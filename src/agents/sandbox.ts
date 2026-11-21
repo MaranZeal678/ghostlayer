@@ -20,14 +20,41 @@ export function sanitize(text: string) {
   return SECRET_PATTERNS.reduce((t, re) => t.replace(re, "[redacted]"), text);
 }
 
+/**
+ * Free/low tiers allow very few concurrent sandboxes. GhostLayer runs one repair phase at a time, so any other
+ * GhostLayer sandbox still alive (e.g. leaked by a job that hit the serverless time limit) is stale: reclaim it.
+ */
+export async function reclaimStaleSandboxes(keep: string[] = []) {
+  const client = solariSandboxes();
+  let killed = 0;
+  for await (const s of client.listAll()) {
+    if (s.metadata?.app !== "ghostlayer" || keep.includes(s.sandboxId)) continue;
+    if (s.state === "stopped") continue;
+    await client.kill(s.sandboxId).catch(() => {});
+    killed++;
+  }
+  return killed;
+}
+
 export async function openSandbox(metadata: Record<string, string>) {
+  try {
+    return await createSandbox(metadata);
+  } catch (err) {
+    if (!/concurren|too many|limit/i.test(String((err as Error).message ?? err))) throw err;
+    const killed = await reclaimStaleSandboxes();
+    console.warn(`[sandbox] concurrency limit hit; reclaimed ${killed} stale GhostLayer sandbox(es), retrying`);
+    return createSandbox(metadata);
+  }
+}
+
+async function createSandbox(metadata: Record<string, string>) {
   const sbx = await solariSandboxes().create({
     template: "base",
     cpu: 4,
     memMb: 8192,
     idleTimeoutMs: 30 * 60_000,
     lifecycle: { onTimeout: "kill" },
-    metadata,
+    metadata: { app: "ghostlayer", ...metadata },
   });
   await sbx.connect();
   return sbx;

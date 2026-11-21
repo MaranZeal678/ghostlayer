@@ -308,13 +308,38 @@ export interface BrowserSession {
 }
 
 /** Open a recorded Solari cloud browser session and connect Playwright over CDP. */
+/** Release GhostLayer browser sessions leaked by jobs that were cut off (older than maxAgeMs, so live ones are safe). */
+export async function reclaimStaleBrowsers(maxAgeMs = 8 * 60_000) {
+  const solari = solariBrowsers();
+  const page = await solari.sessions.list({ limit: 50, metadata: { app: "ghostlayer" } }).catch(() => null);
+  let released = 0;
+  for (const s of page?.sessions ?? []) {
+    const age = s.createdAt ? Date.now() - new Date(s.createdAt).getTime() : Infinity;
+    if (/released|ended|closed/i.test(s.status) || age < maxAgeMs) continue;
+    solari.sessions.release(s.id);
+    released++;
+  }
+  return released;
+}
+
 export async function openSolariBrowser(meta: Record<string, string>): Promise<BrowserSession> {
   const solari = solariBrowsers();
-  const session = await solari.sessions.create({
-    recording: true,
-    sessionTimeoutMs: 20 * 60_000,
-    userMetadata: { app: "ghostlayer", ...meta },
-  });
+  const create = () =>
+    solari.sessions.create({
+      recording: true,
+      sessionTimeoutMs: 20 * 60_000,
+      userMetadata: { app: "ghostlayer", ...meta },
+    });
+  let session;
+  try {
+    session = await create();
+  } catch (err) {
+    if (!/concurren|too many|limit/i.test(String((err as Error).message ?? err))) throw err;
+    const n = await reclaimStaleBrowsers();
+    console.warn(`[browser] concurrency limit hit; released ${n} stale GhostLayer session(s), retrying`);
+    await new Promise((r) => setTimeout(r, 3000));
+    session = await create();
+  }
   let browser: Browser;
   try {
     browser = await chromium.connectOverCDP(session.cdpEndpoint, { timeout: 30000 });
