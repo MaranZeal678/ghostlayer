@@ -8,12 +8,12 @@ import { heartbeat } from "./queue";
 import type { Job } from "@/generated/prisma/client";
 
 export async function processJob(job: Job) {
-  const { runScan, runInvestigate } = await import("@/agents/scan");
-  const { runRepair, runVerify } = await import("@/agents/repair");
-  const { runPublish } = await import("@/agents/publisher");
   console.log(`[worker] ▶ ${job.kind} ${job.targetId}`);
   const beat = setInterval(() => void heartbeat(job.id), 60_000);
   try {
+    const { runScan, runInvestigate } = await import("@/agents/scan");
+    const { runRepair, runVerify } = await import("@/agents/repair");
+    const { runPublish } = await import("@/agents/publisher");
     if (job.kind === "SCAN") await runScan(job.targetId);
     else if (job.kind === "INVESTIGATE") await runInvestigate(job.targetId);
     else if (job.kind === "REPAIR") await runRepair(job.targetId);

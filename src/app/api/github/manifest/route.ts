@@ -11,16 +11,19 @@ export const GET = handle(async (req: Request) => {
   if (process.env.NODE_ENV === "production") throw new HttpError(404, "Not available");
   const origin = new URL(req.url).origin;
   const org = new URL(req.url).searchParams.get("org");
+  // The App serves production (callbacks, webhooks); the one-time credential handoff comes back to this local server.
+  const pub = (process.env.GITHUB_APP_PUBLIC_URL || process.env.NEXT_PUBLIC_APP_URL || origin).replace(/\/$/, "");
+  const isPublic = pub.startsWith("https://");
   const manifest = {
     name: `GhostLayer ${Math.random().toString(36).slice(2, 6)}`,
-    url: origin,
-    hook_attributes: { url: `${origin}/api/github/webhooks`, active: false },
+    url: pub,
+    hook_attributes: { url: `${pub}/api/github/webhooks`, active: isPublic },
     redirect_url: `${origin}/api/github/manifest/callback`,
-    callback_urls: [`${origin}/api/github/callback`],
+    callback_urls: [...new Set([`${pub}/api/github/callback`, `${origin}/api/github/callback`])],
     request_oauth_on_install: true,
     public: false,
     default_permissions: { metadata: "read", contents: "write", pull_requests: "write" },
-    default_events: [],
+    default_events: isPublic ? ["installation_target", "repository"] : [],
   };
   const action = org
     ? `https://github.com/organizations/${encodeURIComponent(org)}/settings/apps/new`
