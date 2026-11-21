@@ -310,6 +310,8 @@ export async function explore(h: PageHarness, ctx: ExploreContext) {
     const interactions_ = acts.filter((x) => {
       if (x.intent !== "interact" || x.priority < 2) return false;
       const t = (byRef.get(x.ref)!.text || byRef.get(x.ref)!.label || x.ref).toLowerCase();
+      // Deterministic guard: never undo the journey's progress (decrement, remove, clear), whatever the planner says.
+      if (UNDO.test(t.trim()) || /decrease|remove|delete|clear|empty/.test(t)) return false;
       if (seenText.has(t)) return false;
       seenText.add(t);
       return true;
