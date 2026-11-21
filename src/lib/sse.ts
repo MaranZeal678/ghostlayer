@@ -22,7 +22,9 @@ export function eventStream(
       };
       let lastSnap = "";
       let idleTicks = 0;
-      while (!closed) {
+      // End before the serverless limit; EventSource reconnects with Last-Event-ID and resumes seamlessly.
+      const deadline = Date.now() + 240_000;
+      while (!closed && Date.now() < deadline) {
         const events = await db.agentEvent.findMany({
           where: { ...where, id: { gt: cursor } },
           orderBy: { id: "asc" },
