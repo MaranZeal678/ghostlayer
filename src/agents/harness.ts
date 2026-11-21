@@ -107,6 +107,10 @@ export interface HarnessOptions {
   originHeaders?: Record<string, string>;
   /** Reuse the CDP default context (Explorer only). Never close it: closing it disconnects the browser. */
   reuseDefault?: boolean;
+  /** Visit this URL first (e.g. a preview URL carrying a one-time token that sets an auth cookie). */
+  bootstrapUrl?: string;
+  /** Install the request router (navigation guard + header injection). Disable only for GhostLayer-owned origins. */
+  intercept?: boolean;
 }
 
 export class PageHarness {
@@ -126,7 +130,7 @@ export class PageHarness {
 
   static async create(context: BrowserContext, opts: HarnessOptions) {
     const blocked: string[] = [];
-    await context.route("**/*", async (route) => {
+    if (opts.intercept !== false) await context.route("**/*", async (route) => {
       const req = route.request();
       let reqOrigin = "";
       try {
@@ -148,6 +152,9 @@ export class PageHarness {
     const h = new PageHarness(page, opts.origin);
     h.blockedNavigations = blocked;
     h.instrument();
+    if (opts.bootstrapUrl) {
+      await page.goto(opts.bootstrapUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    }
     return h;
   }
 

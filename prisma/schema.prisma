@@ -88,7 +88,8 @@ enum JobKind {
   SCAN // Explorer
   INVESTIGATE // Investigator (signals persisted on Scan.signals)
   REPAIR // Engineer (one attempt)
-  VERIFY // Verifier (one attempt)
+  VERIFY // Verifier: independent rebuild, tests, launch patched app
+  VERIFY_REPLAY // Verifier: browser replays against the patched app
   PUBLISH
 }
 

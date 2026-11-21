@@ -8,6 +8,7 @@ import { structured } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { emit, finishAgentRun, startAgentRun } from "@/lib/events";
 import { scopedRepoToken, githubConfigured } from "@/lib/github";
+import { solariSandboxes } from "@/lib/solari";
 import type { Prisma, RepairStatus } from "@/generated/prisma/client";
 import { saveEvidence } from "./scan";
 import { enqueue } from "@/lib/queue";
@@ -356,176 +357,266 @@ export async function runVerify(repairId: string) {
     await setStatus(repairId, "REJECTED", { completedAt: new Date(), errorMessage: feedback.slice(0, 1000) });
     await emit(scope, null, "repair.exhausted", `No verified fix after ${maxAttempts} attempt(s); human review needed`);
   };
-  {
-    const ver = await startAgentRun(scope, "VERIFIER", `Attempt ${attempt}: try to prove the patch wrong — rebuild from ${baseSha.slice(0, 7)} + diff, replay the failing journey`);
-    const checks: { name: string; passed: boolean | null; detail: string }[] = [];
-    const record = async (name: string, passed: boolean | null, detail: string, payload?: Record<string, unknown>) => {
-      checks.push({ name, passed, detail });
-      await emit(scope, "VERIFIER", "check.result", `${passed === null ? "◌" : passed ? "✓" : "✗"} ${name}: ${detail}`, { name, passed, ...payload });
+  const ver = await startAgentRun(scope, "VERIFIER", `Attempt ${attempt}: try to prove the patch wrong — rebuild from ${baseSha.slice(0, 7)} + diff, replay the failing journey`);
+  const checks: VerifyCheck[] = [];
+  const record = async (name: string, passed: boolean | null, detail: string, payload?: Record<string, unknown>) => {
+    checks.push({ name, passed, detail });
+    await emit(scope, "VERIFIER", "check.result", `${passed === null ? "◌" : passed ? "✓" : "✗"} ${name}: ${detail}`, { name, passed, ...payload });
+  };
+  let vsbx: Sbx | null = null;
+  let keepSandbox = false;
+  let browser: Awaited<ReturnType<typeof openSolariBrowser>> | null = null;
+  try {
+    // 1. Original failure still reproduces on the unpatched deployment.
+    browser = await openSolariBrowser({ repairId, role: "verifier" });
+    await db.agentRun.update({ where: { id: ver.id }, data: { externalExecutionId: browser.sessionId } });
+    let before = await replayOnce(browser, origin, repro.trail, repro.trigger);
+    if (before.preError || before.obs.error) before = await replayOnce(browser, origin, repro.trail, repro.trigger);
+    const beforeEx = exhibits(repro.kind, before.obs);
+    const beforeShot = before.shot ? await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "before", mimeType: "image/jpeg", content: before.shot }) : undefined;
+    await record("Original failure reproduced (unpatched)", beforeEx.failed, `${origin}: ${beforeEx.detail}`, { evidenceId: beforeShot });
+    await browser.close();
+    browser = null;
+
+    // 2. Independent rebuild: fresh sandbox, base commit, apply the diff artifact.
+    const readToken = await scopedRepoToken(project.githubInstallationId, project.repositoryId, { contents: "read", metadata: "read" });
+    const prep = await prepareSandbox(repairId, "verifier", project.repositoryFullName, readToken, baseSha);
+    vsbx = prep.sbx;
+    await vsbx.files.write("/work/fix.diff", diff.endsWith("\n") ? diff : `${diff}\n`);
+    const apply = await sh(vsbx, "git apply --index /work/fix.diff", { cwd: REPO_DIR });
+    await record("Patch applies cleanly to base commit", apply.exitCode === 0, apply.exitCode === 0 ? `${baseSha.slice(0, 7)} + ${changed.length} file(s)` : apply.output.slice(-200));
+    if (apply.exitCode !== 0) throw new VerifyReject(`Patch does not apply to base commit: ${apply.output.slice(-200)}`);
+    if (changed.some((c) => /(^|\/)package\.json$/.test(c.path)))
+      await sh(vsbx, installCommand(prep.info.packageManager), { cwd: REPO_DIR, timeoutMs: 600_000 });
+    const vChecks = await runChecks(vsbx, prep.info);
+    const tests = vChecks.find((c) => c.name === "tests");
+    const build = vChecks.find((c) => c.name === "build");
+    await record("Existing + new tests pass (independent run)", tests ? tests.result.exitCode === 0 : null, tests ? `${tests.result.command} → exit ${tests.result.exitCode}` : "no test script");
+    await record("Build succeeds", build ? build.result.exitCode === 0 : null, build ? `${build.result.command} → exit ${build.result.exitCode}` : "no build script");
+    await saveEvidence({
+      repairAttemptId: repairId,
+      findingId: finding.id,
+      type: "TEST_OUTPUT",
+      label: `Verifier independent checks (attempt ${attempt})`,
+      mimeType: "text/plain",
+      content: vChecks.map((c) => `$ ${c.result.command}\nexit ${c.result.exitCode}\n${c.result.output}`).join("\n\n"),
+    });
+    const state: VerifyState = {
+      agentRunId: ver.id,
+      checks,
+      beforeFailed: beforeEx.failed,
+      beforeShot,
+      testsOk: tests ? tests.result.exitCode === 0 : null,
+      buildOk: build ? build.result.exitCode === 0 : null,
     };
-    let vsbx: Sbx | null = null;
-    let browser: Awaited<ReturnType<typeof openSolariBrowser>> | null = null;
-    try {
-      // 1. Original failure still reproduces on the unpatched deployment.
-      browser = await openSolariBrowser({ repairId, role: "verifier" });
-      await db.agentRun.update({ where: { id: ver.id }, data: { externalExecutionId: browser.sessionId } });
-      const before = await replayOnce(browser, origin, repro.trail, repro.trigger);
-      const beforeEx = exhibits(repro.kind, before.obs);
-      const beforeShot = before.shot ? await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "before", mimeType: "image/jpeg", content: before.shot }) : undefined;
-      await record("Original failure reproduced (unpatched)", beforeEx.failed, `${origin}: ${beforeEx.detail}`, { evidenceId: beforeShot });
 
-      // 2. Independent rebuild: fresh sandbox, base commit, apply the diff artifact.
-      const readToken = await scopedRepoToken(project.githubInstallationId, project.repositoryId, { contents: "read", metadata: "read" });
-      const prep = await prepareSandbox(repairId, "verifier", project.repositoryFullName, readToken, baseSha);
-      vsbx = prep.sbx;
-      await vsbx.files.write("/work/fix.diff", diff.endsWith("\n") ? diff : `${diff}\n`);
-      const apply = await sh(vsbx, "git apply --index /work/fix.diff", { cwd: REPO_DIR });
-      await record("Patch applies cleanly to base commit", apply.exitCode === 0, apply.exitCode === 0 ? `${baseSha.slice(0, 7)} + ${changed.length} file(s)` : apply.output.slice(-200));
-      if (apply.exitCode !== 0) throw new VerifyReject(`Patch does not apply to base commit: ${apply.output.slice(-200)}`);
-      if (changed.some((c) => /(^|\/)package\.json$/.test(c.path)))
-        await sh(vsbx, installCommand(prep.info.packageManager), { cwd: REPO_DIR, timeoutMs: 600_000 });
-      const vChecks = await runChecks(vsbx, prep.info);
-      const tests = vChecks.find((c) => c.name === "tests");
-      const build = vChecks.find((c) => c.name === "build");
-      await record("Existing + new tests pass (independent run)", tests ? tests.result.exitCode === 0 : null, tests ? `${tests.result.command} → exit ${tests.result.exitCode}` : "no test script");
-      await record("Build succeeds", build ? build.result.exitCode === 0 : null, build ? `${build.result.command} → exit ${build.result.exitCode}` : "no build script");
-      await saveEvidence({
-        repairAttemptId: repairId,
-        findingId: finding.id,
-        type: "TEST_OUTPUT",
-        label: `Verifier independent checks (attempt ${attempt})`,
-        mimeType: "text/plain",
-        content: vChecks.map((c) => `$ ${c.result.command}\nexit ${c.result.exitCode}\n${c.result.output}`).join("\n\n"),
+    // 3. Launch the patched app; the browser replays run as their own job (keeps each serverless job short).
+    if (build && build.result.exitCode === 0 && prep.info.scripts.start) {
+      await vsbx.commands.start("sh", {
+        args: ["-c", `PORT=3000 HOSTNAME=0.0.0.0 ${runScript(prep.info.packageManager, "start")} > /work/app.log 2>&1`],
+        cwd: REPO_DIR,
+        env: { PATH: `/opt/node/bin:/usr/local/bin:/usr/bin:/bin`, NODE_ENV: "production" },
       });
-
-      // 3. Launch patched app and replay the journey against it.
-      let patchedOk: boolean | null = null;
-      let regressionOk: boolean | null = null;
-      let afterShot: string | undefined;
-      if (build && build.result.exitCode === 0 && prep.info.scripts.start) {
-        await vsbx.commands.start("sh", {
-          args: ["-c", `PORT=3000 HOSTNAME=0.0.0.0 ${runScript(prep.info.packageManager, "start")} > /work/app.log 2>&1`],
-          cwd: REPO_DIR,
-          env: { PATH: `/opt/node/bin:/usr/local/bin:/usr/bin:/bin`, NODE_ENV: "production" },
-        });
-        const ready = await sh(vsbx, "for i in $(seq 1 60); do curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ | grep -q 200 && echo up && exit 0; sleep 1; done; tail -20 /work/app.log; exit 1", { timeoutMs: 90_000 });
-        if (ready.exitCode !== 0) {
-          await record("Patched app starts", false, ready.output.slice(-200));
-          throw new VerifyReject(`Patched app did not start: ${ready.output.slice(-300)}`);
-        }
-        const preview = await vsbx.previewUrl(3000);
-        const previewUrl = new URL(preview.url);
-        const token = preview.token ?? previewUrl.searchParams.get("slr_token") ?? undefined;
-        const headers = token ? { "x-solari-preview-token": token } : undefined;
-        if (previewUrl.pathname !== "/" && previewUrl.pathname !== "") throw new Error(`Unsupported preview URL layout (path prefix ${previewUrl.pathname})`);
-        let reachable = 0;
-        for (let i = 0; i < 10 && !(reachable > 0 && reachable < 400); i++) {
-          reachable = await fetch(`${previewUrl.origin}/`, { headers: headers ?? {} }).then((r) => r.status).catch(() => 0);
-          if (!(reachable > 0 && reachable < 400)) await new Promise((r) => setTimeout(r, 1500));
-        }
-        if (!(reachable > 0 && reachable < 400)) throw new Error(`Solari preview for the patched app is unreachable (HTTP ${reachable})`);
-        await emit(scope, "VERIFIER", "preview.ready", `Patched app running in sandbox; replaying journey via Solari preview ${previewUrl.host}`);
-        const runs: boolean[] = [];
-        for (let i = 1; i <= 3; i++) {
-          const step: Step = repro.trigger.kind === "click" ? { ...repro.trigger, count: i === 3 ? 3 : repro.trigger.count } : repro.trigger;
-          const r = await replayOnce(browser, previewUrl.origin, repro.trail, step, headers);
-          const ex = exhibits(repro.kind, r.obs);
-          const okMutations = r.obs.mutations.filter((m) => (m.status ?? 0) > 0 && (m.status ?? 0) < 400).length;
-          const ok =
-            !r.preError &&
-            !r.obs.error &&
-            !ex.failed &&
-            r.obs.pageErrors.length === 0 &&
-            (repro.kind !== "duplicate_mutation" || okMutations === 1) &&
-            (repro.trigger.kind !== "goto" || ((r.obs.navigationStatus ?? 0) > 0 && (r.obs.navigationStatus ?? 0) < 400));
-          runs.push(ok);
-          if (i === 1 && r.shot) afterShot = await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "after", mimeType: "image/jpeg", content: r.shot });
-          await emit(scope, "VERIFIER", "replay.run", `Patched replay #${i} (${describeStep(step)}): ${ok ? "no failure" : "STILL FAILS"} — ${r.preError ? `trail did not complete: ${r.preError.slice(0, 80)}` : r.obs.error ? `action error: ${r.obs.error.slice(0, 80)}` : ex.detail}`, { evidenceId: i === 1 ? afterShot : undefined });
-        }
-        patchedOk = runs.every(Boolean);
-        await record("Original failure resolved (patched, 3 replays incl. triple-click)", patchedOk, `${runs.filter(Boolean).length}/3 replays clean`, { evidenceId: afterShot });
-        if (repro.control) {
-          const c = await replayOnce(browser, previewUrl.origin, repro.trail, repro.control, headers);
-          const okMut = c.obs.mutations.filter((m) => (m.status ?? 0) > 0 && (m.status ?? 0) < 400);
-          regressionOk = !c.preError && !c.obs.error && c.obs.mutations.length === 1 && okMut.length === 1 && c.obs.pageErrors.length === 0;
-          await record("Normal single-click journey still works", regressionOk, `${c.obs.mutations.length} request(s): ${c.obs.mutations.map((m) => `${m.method} ${m.path} → ${m.status ?? m.failed}`).join(", ") || "none"}`);
-        } else {
-          // No control variant: require that the plain journey completes cleanly on the patched build.
-          const c = await replayOnce(browser, previewUrl.origin, repro.trail, { kind: "goto", path: repro.trail.find((s) => s.kind === "goto")?.path ?? "/" }, headers);
-          regressionOk = !c.preError && !c.obs.error && c.obs.pageErrors.length === 0 && (c.obs.navigationStatus ?? 0) < 400;
-          await record("Journey still completes on patched build", regressionOk, c.preError ?? c.obs.error ?? `HTTP ${c.obs.navigationStatus}`);
-        }
-      } else {
-        await record("Browser verification on patched app", null, "Could not launch patched app (no successful build or start script)");
+      const ready = await sh(vsbx, "for i in $(seq 1 60); do curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ | grep -q 200 && echo up && exit 0; sleep 1; done; tail -20 /work/app.log; exit 1", { timeoutMs: 90_000 });
+      if (ready.exitCode !== 0) {
+        await record("Patched app starts", false, ready.output.slice(-200));
+        throw new VerifyReject(`Patched app did not start: ${ready.output.slice(-300)}`);
       }
-
-      // 4. Adversarial review of the diff in a fresh model context.
-      let verdict: z.infer<typeof VerdictSchema> | null = null;
-      try {
-        verdict = await structured({
-          name: "verifier_review",
-          schema: VerdictSchema,
-          system: `You are the Verification agent of GhostLayer. Your job is to PROVE THIS FIX WRONG if you can. You did not write it; do not trust any claims about it.
-Look for: race conditions still possible, guards that never reset (control stuck disabled after success OR after an error), changed behavior for normal users, missing error handling, tests that don't actually exercise the bug. Be concrete; do not invent problems the diff cannot have.`,
-          user: JSON.stringify({ bug: { title: finding.title, expected: finding.expectedBehavior, actual: finding.actualBehavior }, diff: diff.slice(0, 12000), deterministicChecks: checks }),
-          maxTokens: 2500,
-        });
-        await emit(scope, "VERIFIER", "review.completed", `Adversarial review: ${verdict.recommendation}${verdict.concerns.length ? ` — ${verdict.concerns[0]}` : " — no concrete defects found"}`, {
-          concerns: verdict.concerns,
-          ideas: verdict.adversarialIdeas,
-        });
-      } catch (err) {
-        await emit(scope, "VERIFIER", "review.unavailable", `AI review unavailable: ${String(err).slice(0, 100)}`);
-      }
-
-      const testsOk = tests ? tests.result.exitCode === 0 : null;
-      const buildOk = build ? build.result.exitCode === 0 : null;
-      const approved = beforeEx.failed && patchedOk === true && regressionOk === true && testsOk !== false && buildOk !== false && verdict?.recommendation !== "reject";
-      await db.verificationResult.upsert({
-        where: { repairAttemptId: repairId },
-        update: {},
-        create: { repairAttemptId: repairId, verifierSummary: "pending" },
-      });
-      await db.verificationResult.update({
-        where: { repairAttemptId: repairId },
-        data: {
-          buildPassed: buildOk,
-          existingTestsPassed: testsOk,
-          originalFailureReproduced: beforeEx.failed,
-          patchedFlowPassed: patchedOk,
-          regressionTestsPassed: regressionOk,
-          humanReviewRequired: true,
-          approved,
-          verifierSummary: approved
-            ? `The original failure reproduced on the unpatched site and did not occur in 3 replays of the patched build (incl. triple-click). Tests and build passed in an independent sandbox. ${verdict?.concerns.length ? `Open concerns: ${verdict.concerns.join("; ")}` : ""}`.trim()
-            : `Rejected: ${checks.filter((c) => c.passed === false).map((c) => c.name).join(", ") || verdict?.reasoning || "verification incomplete"}`,
-          checks: { checks, verdict } as unknown as Prisma.InputJsonValue,
-          evidenceReferences: [beforeShot, afterShot].filter(Boolean) as string[],
-          completedAt: new Date(),
-        },
-      });
-      await finishAgentRun(ver.id, "COMPLETED", approved ? "Patch approved for human review" : "Patch rejected");
-      if (approved) {
-        await setStatus(repairId, "READY_FOR_REVIEW", { completedAt: new Date(), branchName: `ghostlayer/fix-${plan!.branchSlug.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "repair"}` });
-        await db.finding.update({ where: { id: finding.id }, data: { verificationStatus: "FIX_VERIFIED" } });
-        await emit(scope, null, "repair.ready", "Return to Wonderland: the fix passed The Trial and is ready for your review");
-        return;
-      }
-      verifierFeedback = `Independent verification rejected the patch: ${checks.filter((c) => c.passed === false).map((c) => `${c.name} (${c.detail})`).join("; ")}${verdict?.concerns.length ? `. Reviewer concerns: ${verdict.concerns.join("; ")}` : ""}`;
+      state.sandboxId = vsbx.id;
+      keepSandbox = true;
+      await db.repairAttempt.update({ where: { id: repairId }, data: { meta: { ...meta, verify: state } as unknown as Prisma.InputJsonValue } });
+      await emit(scope, "VERIFIER", "preview.starting", "Patched app is running in the Verifier's sandbox; replaying the journey against it next");
+      await enqueue("VERIFY_REPLAY", repairId, `verify-replay:${repairId}:${attempt}`);
+      return;
+    }
+    await record("Browser verification on patched app", null, "Could not launch patched app (no successful build or start script)");
+    return await finalizeVerification({ repair, state, patchedOk: null, regressionOk: null, afterShot: undefined, retryOrReject });
+  } catch (err) {
+    if (err instanceof VerifyReject) {
+      verifierFeedback = `Independent verification rejected the patch: ${err.message}`;
+      await finishAgentRun(ver.id, "COMPLETED", "Patch rejected");
       await emit(scope, "VERIFIER", "repair.rejected", verifierFeedback.slice(0, 300));
       return retryOrReject(verifierFeedback);
-    } catch (err) {
-      if (err instanceof VerifyReject) {
-        verifierFeedback = `Independent verification rejected the patch: ${err.message}`;
-        await finishAgentRun(ver.id, "COMPLETED", "Patch rejected");
-        await emit(scope, "VERIFIER", "repair.rejected", verifierFeedback.slice(0, 300));
-        return retryOrReject(verifierFeedback);
-      }
-      await finishAgentRun(ver.id, "FAILED", undefined, String((err as Error).message ?? err).slice(0, 300));
-      throw err;
-    } finally {
-      await browser?.close();
-      await vsbx?.kill().catch(() => {});
     }
+    await finishAgentRun(ver.id, "FAILED", undefined, String((err as Error).message ?? err).slice(0, 300));
+    throw err;
+  } finally {
+    await browser?.close();
+    if (!keepSandbox) await vsbx?.kill().catch(() => {});
   }
+}
+
+type VerifyCheck = { name: string; passed: boolean | null; detail: string };
+type VerifyState = {
+  agentRunId: string;
+  checks: VerifyCheck[];
+  beforeFailed: boolean;
+  beforeShot?: string;
+  testsOk: boolean | null;
+  buildOk: boolean | null;
+  sandboxId?: string;
+};
+
+/** Verifier replay job: replay the failing journey (and variants) against the patched app in the same sandbox. */
+export async function runVerifyReplay(repairId: string) {
+  const repair = await loadRepair(repairId);
+  if (!repair) throw new Error(`Repair ${repairId} not found`);
+  if (repair.status !== "VERIFYING") return;
+  const { finding } = repair;
+  const scope = { repairAttemptId: repairId, scanId: finding.scanId };
+  const repro = finding.reproductionSteps as unknown as Repro;
+  const meta = (repair.meta ?? {}) as RepairMeta & { verify?: VerifyState };
+  const state = meta.verify;
+  if (!state?.sandboxId) throw new Error("Verifier sandbox state missing");
+  const maxAttempts = Number(process.env.REPAIR_MAX_ATTEMPTS ?? 2);
+  const attempt = repair.attempt;
+  const retryOrReject = async (feedback: string) => {
+    if (attempt < maxAttempts) {
+      await db.repairAttempt.update({ where: { id: repairId }, data: { attempt: attempt + 1, status: "QUEUED", meta: { ...meta, verify: undefined, feedback } as Prisma.InputJsonValue } });
+      await emit(scope, null, "repair.retry", `Sending the Verifier's evidence back to the Engineer for attempt ${attempt + 1} of ${maxAttempts}`);
+      await enqueue("REPAIR", repairId, `repair:${repairId}:${attempt + 1}`);
+      return;
+    }
+    await setStatus(repairId, "REJECTED", { completedAt: new Date(), errorMessage: feedback.slice(0, 1000) });
+    await emit(scope, null, "repair.exhausted", `No verified fix after ${maxAttempts} attempt(s); human review needed`);
+  };
+  const record = async (name: string, passed: boolean | null, detail: string, payload?: Record<string, unknown>) => {
+    state.checks.push({ name, passed, detail });
+    await emit(scope, "VERIFIER", "check.result", `${passed === null ? "◌" : passed ? "✓" : "✗"} ${name}: ${detail}`, { name, passed, ...payload });
+  };
+  let browser: Awaited<ReturnType<typeof openSolariBrowser>> | null = null;
+  let vsbx: Sbx | null = null;
+  try {
+    vsbx = (await solariSandboxes().connect(state.sandboxId)) as Sbx;
+    const preview = await vsbx.previewUrl(3000);
+    const previewUrl = new URL(preview.url);
+    if (previewUrl.pathname !== "/" && previewUrl.pathname !== "") throw new Error(`Unsupported preview URL layout (path prefix ${previewUrl.pathname})`);
+    const token = preview.token ?? previewUrl.searchParams.get("slr_token") ?? "";
+    // Visiting the preview once with its token sets an auth cookie; later requests need no interception (fast, reliable).
+    const bootstrapUrl = previewUrl.searchParams.has("slr_token") ? preview.url : `${previewUrl.origin}/?slr_token=${encodeURIComponent(token)}`;
+    let reachable = 0;
+    for (let i = 0; i < 10 && !(reachable > 0 && reachable < 400); i++) {
+      reachable = await fetch(bootstrapUrl).then((r) => r.status).catch(() => 0);
+      if (!(reachable > 0 && reachable < 400)) await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!(reachable > 0 && reachable < 400)) throw new Error(`Solari preview for the patched app is unreachable (HTTP ${reachable})`);
+    await emit(scope, "VERIFIER", "preview.ready", `Replaying the journey against the patched build via Solari preview ${previewUrl.host}`);
+    browser = await openSolariBrowser({ repairId, role: "verifier-replay" });
+    const replay = async (step: Step) => {
+      // A journey that could not complete is inconclusive, not a verdict: retry once.
+      let r = await replayOnce(browser!, previewUrl.origin, repro.trail, step, undefined, { bootstrapUrl, intercept: false });
+      if (r.preError || r.obs.error) r = await replayOnce(browser!, previewUrl.origin, repro.trail, step, undefined, { bootstrapUrl, intercept: false });
+      return r;
+    };
+    const runs: (boolean | null)[] = [];
+    let afterShot: string | undefined;
+    for (let i = 1; i <= 3; i++) {
+      const step: Step = repro.trigger.kind === "click" ? { ...repro.trigger, count: i === 3 ? 3 : repro.trigger.count } : repro.trigger;
+      const r = await replay(step);
+      const ex = exhibits(repro.kind, r.obs);
+      const inconclusive = Boolean(r.preError || r.obs.error);
+      const okMutations = r.obs.mutations.filter((m) => (m.status ?? 0) > 0 && (m.status ?? 0) < 400).length;
+      const ok = inconclusive
+        ? null
+        : !ex.failed &&
+          r.obs.pageErrors.length === 0 &&
+          (repro.kind !== "duplicate_mutation" || okMutations === 1) &&
+          (repro.trigger.kind !== "goto" || ((r.obs.navigationStatus ?? 0) > 0 && (r.obs.navigationStatus ?? 0) < 400));
+      runs.push(ok);
+      if (!afterShot && ok && r.shot) afterShot = await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "after", mimeType: "image/jpeg", content: r.shot });
+      await emit(
+        scope,
+        "VERIFIER",
+        "replay.run",
+        `Patched replay #${i} (${describeStep(step)}): ${ok === null ? "inconclusive" : ok ? "no failure" : "STILL FAILS"} — ${inconclusive ? `journey did not complete: ${(r.preError ?? r.obs.error ?? "").slice(0, 80)}` : ex.detail}`,
+        { evidenceId: ok ? afterShot : undefined },
+      );
+    }
+    const conclusive = runs.filter((x) => x !== null) as boolean[];
+    const patchedOk = conclusive.length >= 2 ? conclusive.every(Boolean) : conclusive.some((x) => !x) ? false : null;
+    await record("Original failure resolved (patched, replays incl. triple-click)", patchedOk, `${conclusive.filter(Boolean).length}/${conclusive.length} conclusive replays clean (${runs.length - conclusive.length} inconclusive)`, { evidenceId: afterShot });
+    let regressionOk: boolean | null = null;
+    if (repro.control) {
+      const c = await replay(repro.control);
+      const okMut = c.obs.mutations.filter((m) => (m.status ?? 0) > 0 && (m.status ?? 0) < 400);
+      regressionOk = c.preError || c.obs.error ? null : c.obs.mutations.length === 1 && okMut.length === 1 && c.obs.pageErrors.length === 0;
+      await record("Normal single-click journey still works", regressionOk, `${c.obs.mutations.length} request(s): ${c.obs.mutations.map((m) => `${m.method} ${m.path} → ${m.status ?? m.failed}`).join(", ") || "none"}`);
+    } else {
+      const c = await replay({ kind: "goto", path: repro.trail.find((s) => s.kind === "goto")?.path ?? "/" });
+      regressionOk = c.preError || c.obs.error ? null : c.obs.pageErrors.length === 0 && (c.obs.navigationStatus ?? 0) < 400;
+      await record("Journey still completes on patched build", regressionOk, c.preError ?? c.obs.error ?? `HTTP ${c.obs.navigationStatus}`);
+    }
+    return await finalizeVerification({ repair, state, patchedOk, regressionOk, afterShot, retryOrReject });
+  } catch (err) {
+    await finishAgentRun(state.agentRunId, "FAILED", undefined, String((err as Error).message ?? err).slice(0, 300));
+    throw err;
+  } finally {
+    await browser?.close();
+    await vsbx?.kill().catch(() => {});
+  }
+}
+
+/** Adversarial review + verdict. Approval requires every deterministic check; the model can only veto. */
+async function finalizeVerification(args: {
+  repair: NonNullable<Awaited<ReturnType<typeof loadRepair>>>;
+  state: VerifyState;
+  patchedOk: boolean | null;
+  regressionOk: boolean | null;
+  afterShot: string | undefined;
+  retryOrReject: (feedback: string) => Promise<void>;
+}) {
+  const { repair, state, patchedOk, regressionOk, afterShot, retryOrReject } = args;
+  const { finding } = repair;
+  const repairId = repair.id;
+  const scope = { repairAttemptId: repairId, scanId: finding.scanId };
+  const meta = (repair.meta ?? {}) as RepairMeta;
+  const checks = state.checks;
+  let verdict: z.infer<typeof VerdictSchema> | null = null;
+  try {
+    verdict = await structured({
+      name: "verifier_review",
+      schema: VerdictSchema,
+      system: `You are the Verification agent of GhostLayer. Your job is to PROVE THIS FIX WRONG if you can. You did not write it; do not trust any claims about it.
+Look for: race conditions still possible, guards that never reset (control stuck disabled after success OR after an error), changed behavior for normal users, missing error handling, tests that don't actually exercise the bug. Be concrete; do not invent problems the diff cannot have.`,
+      user: JSON.stringify({ bug: { title: finding.title, expected: finding.expectedBehavior, actual: finding.actualBehavior }, diff: (repair.diff ?? "").slice(0, 12000), deterministicChecks: checks }),
+      maxTokens: 2500,
+    });
+    await emit(scope, "VERIFIER", "review.completed", `Adversarial review: ${verdict.recommendation}${verdict.concerns.length ? ` — ${verdict.concerns[0]}` : " — no concrete defects found"}`, {
+      concerns: verdict.concerns,
+      ideas: verdict.adversarialIdeas,
+    });
+  } catch (err) {
+    await emit(scope, "VERIFIER", "review.unavailable", `AI review unavailable: ${String(err).slice(0, 100)}`);
+  }
+  const approved = state.beforeFailed && patchedOk === true && regressionOk === true && state.testsOk !== false && state.buildOk !== false && verdict?.recommendation !== "reject";
+  await db.verificationResult.upsert({ where: { repairAttemptId: repairId }, update: {}, create: { repairAttemptId: repairId, verifierSummary: "pending" } });
+  await db.verificationResult.update({
+    where: { repairAttemptId: repairId },
+    data: {
+      buildPassed: state.buildOk,
+      existingTestsPassed: state.testsOk,
+      originalFailureReproduced: state.beforeFailed,
+      patchedFlowPassed: patchedOk,
+      regressionTestsPassed: regressionOk,
+      humanReviewRequired: true,
+      approved,
+      verifierSummary: approved
+        ? `The original failure reproduced on the unpatched site and did not occur in the patched build's replays (incl. triple-click). Tests and build passed in an independent sandbox. ${verdict?.concerns.length ? `Open concerns: ${verdict.concerns.join("; ")}` : ""}`.trim()
+        : `Rejected: ${checks.filter((c) => c.passed === false).map((c) => c.name).join(", ") || verdict?.reasoning || "verification incomplete"}`,
+      checks: { checks, verdict } as unknown as Prisma.InputJsonValue,
+      evidenceReferences: [state.beforeShot, afterShot].filter(Boolean) as string[],
+      completedAt: new Date(),
+    },
+  });
+  await finishAgentRun(state.agentRunId, "COMPLETED", approved ? "Patch approved for human review" : "Patch rejected");
+  if (approved) {
+    const slug = (meta.branchSlug ?? "repair").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "repair";
+    await setStatus(repairId, "READY_FOR_REVIEW", { completedAt: new Date(), branchName: `ghostlayer/fix-${slug}` });
+    await db.finding.update({ where: { id: finding.id }, data: { verificationStatus: "FIX_VERIFIED" } });
+    await emit(scope, null, "repair.ready", "Return to Wonderland: the fix passed The Trial and is ready for your review");
+    return;
+  }
+  const feedback = `Independent verification rejected the patch: ${checks.filter((c) => c.passed !== true).map((c) => `${c.name} (${c.detail})`).join("; ")}${verdict?.concerns.length ? `. Reviewer concerns: ${verdict.concerns.join("; ")}` : ""}`;
+  await emit(scope, "VERIFIER", "repair.rejected", feedback.slice(0, 300));
+  return retryOrReject(feedback);
 }

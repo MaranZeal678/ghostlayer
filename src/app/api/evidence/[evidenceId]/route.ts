@@ -1,7 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { handle, HttpError } from "@/lib/http";
-import { solariBrowsers } from "@/lib/solari";
 
 type Ctx = { params: Promise<{ evidenceId: string }> };
 
@@ -18,6 +17,7 @@ export const GET = handle(async (_req: Request, { params }: Ctx) => {
   if (!ev) throw new HttpError(404, "Evidence not found");
   if (ev.storageReference?.startsWith("solari-replay:")) {
     const sessionId = ev.storageReference.slice("solari-replay:".length);
+    const { solariBrowsers } = await import("@/lib/solari");
     const bytes = await solariBrowsers().sessions.downloadReplay(sessionId).catch(() => null);
     if (!bytes) throw new HttpError(404, "Replay not available yet (or expired)");
     return new Response(Buffer.from(bytes), { headers: { "content-type": "application/x-ndjson", "cache-control": "private, max-age=300" } });

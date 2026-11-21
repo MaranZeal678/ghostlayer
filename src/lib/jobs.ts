@@ -12,12 +12,13 @@ export async function processJob(job: Job) {
   const beat = setInterval(() => void heartbeat(job.id), 60_000);
   try {
     const { runScan, runInvestigate } = await import("@/agents/scan");
-    const { runRepair, runVerify } = await import("@/agents/repair");
+    const { runRepair, runVerify, runVerifyReplay } = await import("@/agents/repair");
     const { runPublish } = await import("@/agents/publisher");
     if (job.kind === "SCAN") await runScan(job.targetId);
     else if (job.kind === "INVESTIGATE") await runInvestigate(job.targetId);
     else if (job.kind === "REPAIR") await runRepair(job.targetId);
     else if (job.kind === "VERIFY") await runVerify(job.targetId);
+    else if (job.kind === "VERIFY_REPLAY") await runVerifyReplay(job.targetId);
     else if (job.kind === "PUBLISH") await runPublish(job.targetId);
     await db.job.update({ where: { id: job.id }, data: { status: "DONE" } });
     console.log(`[worker] ✓ ${job.kind} ${job.targetId}`);
@@ -30,7 +31,7 @@ export async function processJob(job: Job) {
         .update({ where: { id: job.targetId }, data: { status: job.kind === "INVESTIGATE" ? "PARTIALLY_COMPLETED" : "FAILED", errorMessage: msg, completedAt: new Date() } })
         .catch(() => {});
       await emit({ scanId: job.targetId }, null, "scan.failed", msg).catch(() => {});
-    } else if (job.kind === "REPAIR" || job.kind === "VERIFY") {
+    } else if (job.kind === "REPAIR" || job.kind === "VERIFY" || job.kind === "VERIFY_REPLAY") {
       await db.repairAttempt.update({ where: { id: job.targetId }, data: { status: "FAILED", errorMessage: msg, completedAt: new Date() } }).catch(() => {});
       await emit({ repairAttemptId: job.targetId }, null, "repair.failed", msg).catch(() => {});
     } else {

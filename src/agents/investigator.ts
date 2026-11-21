@@ -63,8 +63,9 @@ export async function replayOnce(
   trail: Step[],
   step: Step,
   originHeaders?: Record<string, string>,
+  extra?: { bootstrapUrl?: string; intercept?: boolean },
 ) {
-  const { harness, context } = await session.newHarness({ origin, originHeaders });
+  const { harness, context } = await session.newHarness({ origin, originHeaders, ...(extra ?? {}) });
   try {
     const pre = await harness.replay(trail);
     const preError = pre.find((o) => o.error)?.error;
