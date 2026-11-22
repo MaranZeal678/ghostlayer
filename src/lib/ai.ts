@@ -24,6 +24,8 @@ export async function structured<T extends z.ZodType>(opts: {
   user: string;
   maxTokens?: number;
   fast?: boolean;
+  /** Reasoning depth. Lower = much faster; agents use "low" except where depth clearly pays off. */
+  effort?: "none" | "low" | "medium" | "high";
 }): Promise<z.infer<T>> {
   const jsonSchema = z.toJSONSchema(opts.schema, { target: "draft-7" });
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -40,6 +42,7 @@ export async function structured<T extends z.ZodType>(opts: {
         json_schema: { name: opts.name, schema: jsonSchema as Record<string, unknown>, strict: false },
       },
       max_completion_tokens: opts.maxTokens ?? 6000,
+      reasoning_effort: opts.effort ?? (process.env.OPENAI_REASONING_EFFORT as "low" | undefined) ?? "low",
     });
     const text = res.choices[0]?.message?.content ?? "";
     try {

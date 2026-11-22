@@ -97,14 +97,41 @@ async function gatherContext(sbx: Sbx, finding: Finding, repro: Repro) {
     const g = await sh(sbx, `grep -rIl --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git -F -- ${q(kw)} . | head -20`, { cwd: REPO_DIR });
     for (const f of g.output.split("\n").map((l) => l.replace(/^\.\//, "").trim()).filter(Boolean)) hits.set(f, (hits.get(f) ?? 0) + 1);
   }
-  const ranked = [...hits.entries()].filter(([f]) => !/\.(md|lock|json)$/.test(f)).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([f]) => f);
+  const ranked = [...hits.entries()].filter(([f]) => !/\.(md|lock|json)$/.test(f)).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([f]) => f);
   const contents: { path: string; content: string }[] = [];
-  for (const f of ranked) contents.push({ path: f, content: (await sbx.files.readText(`${REPO_DIR}/${f}`)).slice(0, 14000) });
+  for (const f of ranked) contents.push({ path: f, content: (await sbx.files.readText(`${REPO_DIR}/${f}`)).slice(0, 9000) });
   // Show one existing test so new tests match conventions.
   const testFile = files.output.split("\n").find((f) => /\.(test|spec)\.(t|j)sx?$/.test(f));
   if (testFile && !ranked.includes(testFile))
-    contents.push({ path: testFile, content: (await sbx.files.readText(`${REPO_DIR}/${testFile}`)).slice(0, 5000) });
+    contents.push({ path: testFile, content: (await sbx.files.readText(`${REPO_DIR}/${testFile}`)).slice(0, 3000) });
   return { fileList: files.output, keywords: [...keywords], candidates: ranked, contents };
+}
+
+/**
+ * Apply one search/replace edit. Exact match first; otherwise match the same lines ignoring indentation and
+ * trailing whitespace (models often get whitespace slightly wrong), re-indenting the replacement to fit.
+ */
+export function applyEdit(text: string, search: string, replace: string): { ok: true; text: string } | { ok: false; reason: string } {
+  const exact = text.split(search).length - 1;
+  if (exact === 1) return { ok: true, text: text.replace(search, () => replace) };
+  if (exact > 1) return { ok: false, reason: `search snippet matched ${exact} times (must be exactly 1)` };
+  const norm = (l: string) => l.trim();
+  const fileLines = text.split("\n");
+  const searchLines = search.replace(/^\n+|\n+$/g, "").split("\n");
+  const want = searchLines.map(norm);
+  const hits: number[] = [];
+  for (let i = 0; i + want.length <= fileLines.length; i++) {
+    let match = true;
+    for (let j = 0; j < want.length; j++) if (norm(fileLines[i + j]) !== want[j]) { match = false; break; }
+    if (match) hits.push(i);
+  }
+  if (hits.length !== 1) return { ok: false, reason: hits.length ? `search snippet matched ${hits.length} times (whitespace-insensitive)` : "search snippet not found" };
+  const at = hits[0];
+  const fileIndent = fileLines[at].match(/^\s*/)![0];
+  const searchIndent = searchLines[0].match(/^\s*/)![0];
+  const replLines = replace.replace(/^\n+|\n+$/g, "").split("\n").map((l) => (l.startsWith(searchIndent) ? fileIndent + l.slice(searchIndent.length) : l));
+  fileLines.splice(at, want.length, ...replLines);
+  return { ok: true, text: fileLines.join("\n") };
 }
 
 async function applyPlan(sbx: Sbx, plan: EditPlan) {
@@ -120,12 +147,12 @@ async function applyPlan(sbx: Sbx, plan: EditPlan) {
       errors.push(`${e.path}: file not found`);
       continue;
     }
-    const count = text.split(e.search).length - 1;
-    if (count !== 1) {
-      errors.push(`${e.path}: search snippet matched ${count} times (must be exactly 1)`);
+    const res = applyEdit(text, e.search, e.replace);
+    if (!res.ok) {
+      errors.push(`${e.path}: ${res.reason}`);
       continue;
     }
-    await sbx.files.write(path, text.replace(e.search, () => e.replace));
+    await sbx.files.write(path, res.text);
   }
   for (const f of plan.newFiles) {
     if (f.path.includes("..")) {
@@ -138,6 +165,31 @@ async function applyPlan(sbx: Sbx, plan: EditPlan) {
   }
   return errors;
 }
+
+type CheckResult = { name: string; result: ShResult; preexisting?: boolean };
+
+/**
+ * Run tests/build. If one fails, re-run it on the untouched base tree (git stash): a failure that already exists
+ * before the patch (e.g. missing deployment env vars) is reported as pre-existing instead of blamed on the patch.
+ */
+async function runChecksWithBaseline(sbx: Sbx, info: RepoInfo): Promise<CheckResult[]> {
+  const results: CheckResult[] = await runChecks(sbx, info);
+  const failed = results.filter((c) => c.result.exitCode !== 0);
+  if (!failed.length) return results;
+  const stash = await sh(sbx, "git stash push --include-untracked -q && echo stashed", { cwd: REPO_DIR });
+  if (!stash.output.includes("stashed")) return results;
+  try {
+    for (const c of failed) {
+      const base = await sh(sbx, c.result.command, { cwd: REPO_DIR, timeoutMs: 600_000 });
+      c.preexisting = base.exitCode !== 0;
+    }
+  } finally {
+    await sh(sbx, "git stash pop -q", { cwd: REPO_DIR });
+  }
+  return results;
+}
+
+const checkOk = (c?: CheckResult) => (!c ? null : c.result.exitCode === 0 ? true : c.preexisting ? null : false);
 
 async function runChecks(sbx: Sbx, info: RepoInfo) {
   const results: { name: string; result: ShResult }[] = [];
@@ -199,7 +251,7 @@ export async function runRepair(repairId: string) {
     let plan: EditPlan | null = null;
     let diff = "";
     let changed: { path: string; content: string }[] = [];
-    let engChecks: { name: string; result: ShResult }[] = [];
+    let engChecks: CheckResult[] = [];
     let baseSha = "";
     let sbx: Sbx | null = null;
     try {
@@ -244,7 +296,7 @@ Never include secrets. Never weaken validation.`,
             previousAttemptRejectedBecause: verifierFeedback ?? undefined,
             previousApplyErrors: applyErrors.length ? applyErrors : undefined,
             repo: { packageManager: prep.info.packageManager, scripts: prep.info.scripts, testFramework: prep.info.testFramework },
-            fileList: ctx.fileList.split("\n").slice(0, 200),
+            fileList: ctx.fileList.split("\n").slice(0, 120),
             candidateFiles: ctx.contents,
           }),
           maxTokens: 8000,
@@ -276,9 +328,9 @@ Never include secrets. Never weaken validation.`,
 
       await setStatus(repairId, "TESTING", { diff, files: changed as unknown as Prisma.InputJsonValue, patchSummary: plan.summary });
       await emit(scope, "ENGINEER", "checks.started", `Running ${[prep.info.hasTestScript && "tests", prep.info.hasBuildScript && "build"].filter(Boolean).join(" + ") || "no checks available"}`);
-      engChecks = await runChecks(sbx, prep.info);
+      engChecks = await runChecksWithBaseline(sbx, prep.info);
       for (const c of engChecks)
-        await emit(scope, "ENGINEER", "check.result", `${c.result.command} → exit ${c.result.exitCode} (${Math.round(c.result.durationMs / 1000)}s)`, {
+        await emit(scope, "ENGINEER", "check.result", `${c.result.command} → exit ${c.result.exitCode} (${Math.round(c.result.durationMs / 1000)}s)${c.preexisting ? " — also fails on the base commit (pre-existing, not caused by this patch)" : ""}`, {
           name: c.name,
           exitCode: c.result.exitCode,
           tail: c.result.output.slice(-600),
@@ -292,7 +344,7 @@ Never include secrets. Never weaken validation.`,
         mimeType: "text/plain",
         content: engChecks.map((c) => `$ ${c.result.command}\nexit ${c.result.exitCode}\n${c.result.output}`).join("\n\n"),
       });
-      const failedCheck = engChecks.find((c) => c.result.exitCode !== 0);
+      const failedCheck = engChecks.find((c) => c.result.exitCode !== 0 && !c.preexisting);
       await db.repairAttempt.update({
         where: { id: repairId },
         data: { testSummary: engChecks.map((c) => ({ name: c.name, command: c.result.command, exitCode: c.result.exitCode, durationMs: c.result.durationMs })) as unknown as Prisma.InputJsonValue },
@@ -304,7 +356,7 @@ Never include secrets. Never weaken validation.`,
         sbx = null;
         return retryOrReject(verifierFeedback);
       }
-      await finishAgentRun(eng.id, "COMPLETED", `${changed.length} file(s) changed; ${engChecks.map((c) => `${c.name} passed`).join(", ") || "no checks"}`);
+      await finishAgentRun(eng.id, "COMPLETED", `${changed.length} file(s) changed; ${engChecks.map((c) => `${c.name} ${c.result.exitCode === 0 ? "passed" : "fails on base too"}`).join(", ") || "no checks"}`);
     } catch (err) {
       await finishAgentRun(eng.id, "FAILED", undefined, String((err as Error).message ?? err).slice(0, 300));
       await sbx?.kill().catch(() => {});
@@ -367,32 +419,40 @@ export async function runVerify(repairId: string) {
   let keepSandbox = false;
   let browser: Awaited<ReturnType<typeof openSolariBrowser>> | null = null;
   try {
-    // 1. Original failure still reproduces on the unpatched deployment.
-    browser = await openSolariBrowser({ repairId, role: "verifier" });
-    await db.agentRun.update({ where: { id: ver.id }, data: { externalExecutionId: browser.sessionId } });
-    let before = await replayOnce(browser, origin, repro.trail, repro.trigger);
-    if (before.preError || before.obs.error) before = await replayOnce(browser, origin, repro.trail, repro.trigger);
+    // 1+2 in parallel: re-prove the failure on the unpatched deployment while a fresh sandbox rebuilds base + diff.
+    const readToken = await scopedRepoToken(project.githubInstallationId, project.repositoryId, { contents: "read", metadata: "read" });
+    const beforeTask = (async () => {
+      browser = await openSolariBrowser({ repairId, role: "verifier" });
+      await db.agentRun.update({ where: { id: ver.id }, data: { externalExecutionId: browser.sessionId } });
+      let b = await replayOnce(browser, origin, repro.trail, repro.trigger);
+      if (b.preError || b.obs.error) b = await replayOnce(browser, origin, repro.trail, repro.trigger);
+      return b;
+    })();
+    const prepTask = prepareSandbox(repairId, "verifier", project.repositoryFullName, readToken, baseSha);
+    const [beforeRes, prepRes] = await Promise.allSettled([beforeTask, prepTask]);
+    if (prepRes.status === "fulfilled") vsbx = prepRes.value.sbx;
+    if (beforeRes.status === "rejected") throw beforeRes.reason;
+    if (prepRes.status === "rejected") throw prepRes.reason;
+    const before = beforeRes.value;
+    const prep = prepRes.value;
+    const sbxV: Sbx = prep.sbx;
     const beforeEx = exhibits(repro.kind, before.obs);
     const beforeShot = before.shot ? await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "before", mimeType: "image/jpeg", content: before.shot }) : undefined;
     await record("Original failure reproduced (unpatched)", beforeEx.failed, `${origin}: ${beforeEx.detail}`, { evidenceId: beforeShot });
-    await browser.close();
+    await (browser as Awaited<ReturnType<typeof openSolariBrowser>> | null)?.close();
     browser = null;
-
-    // 2. Independent rebuild: fresh sandbox, base commit, apply the diff artifact.
-    const readToken = await scopedRepoToken(project.githubInstallationId, project.repositoryId, { contents: "read", metadata: "read" });
-    const prep = await prepareSandbox(repairId, "verifier", project.repositoryFullName, readToken, baseSha);
-    vsbx = prep.sbx;
-    await vsbx.files.write("/work/fix.diff", diff.endsWith("\n") ? diff : `${diff}\n`);
-    const apply = await sh(vsbx, "git apply --index /work/fix.diff", { cwd: REPO_DIR });
+    await sbxV.files.write("/work/fix.diff", diff.endsWith("\n") ? diff : `${diff}\n`);
+    const apply = await sh(sbxV, "git apply --index /work/fix.diff", { cwd: REPO_DIR });
     await record("Patch applies cleanly to base commit", apply.exitCode === 0, apply.exitCode === 0 ? `${baseSha.slice(0, 7)} + ${changed.length} file(s)` : apply.output.slice(-200));
     if (apply.exitCode !== 0) throw new VerifyReject(`Patch does not apply to base commit: ${apply.output.slice(-200)}`);
     if (changed.some((c) => /(^|\/)package\.json$/.test(c.path)))
-      await sh(vsbx, installCommand(prep.info.packageManager), { cwd: REPO_DIR, timeoutMs: 600_000 });
-    const vChecks = await runChecks(vsbx, prep.info);
+      await sh(sbxV, installCommand(prep.info.packageManager), { cwd: REPO_DIR, timeoutMs: 600_000 });
+    const vChecks = await runChecksWithBaseline(sbxV, prep.info);
     const tests = vChecks.find((c) => c.name === "tests");
     const build = vChecks.find((c) => c.name === "build");
-    await record("Existing + new tests pass (independent run)", tests ? tests.result.exitCode === 0 : null, tests ? `${tests.result.command} → exit ${tests.result.exitCode}` : "no test script");
-    await record("Build succeeds", build ? build.result.exitCode === 0 : null, build ? `${build.result.command} → exit ${build.result.exitCode}` : "no build script");
+    const pre = (c?: CheckResult) => (c?.preexisting ? " — also fails on the base commit (pre-existing, not caused by this patch)" : "");
+    await record("Existing + new tests pass (independent run)", checkOk(tests), tests ? `${tests.result.command} → exit ${tests.result.exitCode}${pre(tests)}` : "no test script");
+    await record("Build succeeds", checkOk(build), build ? `${build.result.command} → exit ${build.result.exitCode}${pre(build)}` : "no build script");
     await saveEvidence({
       repairAttemptId: repairId,
       findingId: finding.id,
@@ -406,23 +466,27 @@ export async function runVerify(repairId: string) {
       checks,
       beforeFailed: beforeEx.failed,
       beforeShot,
-      testsOk: tests ? tests.result.exitCode === 0 : null,
-      buildOk: build ? build.result.exitCode === 0 : null,
+      testsOk: checkOk(tests),
+      buildOk: checkOk(build),
     };
 
     // 3. Launch the patched app; the browser replays run as their own job (keeps each serverless job short).
-    if (build && build.result.exitCode === 0 && prep.info.scripts.start) {
-      await vsbx.commands.start("sh", {
-        args: ["-c", `PORT=3000 HOSTNAME=0.0.0.0 ${runScript(prep.info.packageManager, "start")} > /work/app.log 2>&1`],
+    // Production build if it works; if the build fails on the base commit too (e.g. env-dependent), fall back to dev mode.
+    const useProd = Boolean(build && build.result.exitCode === 0 && prep.info.scripts.start);
+    const useDev = !useProd && Boolean(prep.info.scripts.dev) && (!build || build.preexisting);
+    if (useProd || useDev) {
+      await sbxV.commands.start("sh", {
+        args: ["-c", `PORT=3000 HOSTNAME=0.0.0.0 ${runScript(prep.info.packageManager, useProd ? "start" : "dev")} > /work/app.log 2>&1`],
         cwd: REPO_DIR,
-        env: { PATH: `/opt/node/bin:/usr/local/bin:/usr/bin:/bin`, NODE_ENV: "production" },
+        env: { PATH: `/opt/node/bin:/usr/local/bin:/usr/bin:/bin`, NODE_ENV: useProd ? "production" : "development" },
       });
-      const ready = await sh(vsbx, "for i in $(seq 1 60); do curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ | grep -q 200 && echo up && exit 0; sleep 1; done; tail -20 /work/app.log; exit 1", { timeoutMs: 90_000 });
+      if (useDev) await emit(scope, "VERIFIER", "preview.dev", "Build fails on the base commit too; verifying the patched app in dev mode instead");
+      const ready = await sh(sbxV, "for i in $(seq 1 90); do c=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/); case $c in 2*|3*|404) echo up; exit 0;; esac; sleep 1; done; tail -20 /work/app.log; exit 1", { timeoutMs: 120_000 });
       if (ready.exitCode !== 0) {
         await record("Patched app starts", false, ready.output.slice(-200));
         throw new VerifyReject(`Patched app did not start: ${ready.output.slice(-300)}`);
       }
-      state.sandboxId = vsbx.id;
+      state.sandboxId = sbxV.id;
       keepSandbox = true;
       await db.repairAttempt.update({ where: { id: repairId }, data: { meta: { ...meta, verify: state } as unknown as Prisma.InputJsonValue } });
       await emit(scope, "VERIFIER", "preview.starting", "Patched app is running in the Verifier's sandbox; replaying the journey against it next");
@@ -441,7 +505,8 @@ export async function runVerify(repairId: string) {
     await finishAgentRun(ver.id, "FAILED", undefined, String((err as Error).message ?? err).slice(0, 300));
     throw err;
   } finally {
-    await browser?.close();
+    // browser is assigned inside an async closure, which TS's narrowing can't see.
+    await (browser as Awaited<ReturnType<typeof openSolariBrowser>> | null)?.close();
     if (!keepSandbox) await vsbx?.kill().catch(() => {});
   }
 }
@@ -510,9 +575,14 @@ export async function runVerifyReplay(repairId: string) {
     };
     const runs: (boolean | null)[] = [];
     let afterShot: string | undefined;
+    // All patched replays and the control run concurrently in isolated contexts of one browser session.
+    const steps: Step[] = [1, 2, 3].map((i) => (repro.trigger.kind === "click" ? { ...repro.trigger, count: i === 3 ? 3 : repro.trigger.count } : repro.trigger));
+    const controlStep: Step = repro.control ?? { kind: "goto", path: repro.trail.find((s) => s.kind === "goto")?.path ?? "/" };
+    const [r1, r2, r3, rc] = await Promise.all([...steps.map((s) => replay(s)), replay(controlStep)]);
+    const results = [r1, r2, r3];
     for (let i = 1; i <= 3; i++) {
-      const step: Step = repro.trigger.kind === "click" ? { ...repro.trigger, count: i === 3 ? 3 : repro.trigger.count } : repro.trigger;
-      const r = await replay(step);
+      const step = steps[i - 1];
+      const r = results[i - 1];
       const ex = exhibits(repro.kind, r.obs);
       const inconclusive = Boolean(r.preError || r.obs.error);
       const okMutations = r.obs.mutations.filter((m) => (m.status ?? 0) > 0 && (m.status ?? 0) < 400).length;
@@ -537,12 +607,12 @@ export async function runVerifyReplay(repairId: string) {
     await record("Original failure resolved (patched, replays incl. triple-click)", patchedOk, `${conclusive.filter(Boolean).length}/${conclusive.length} conclusive replays clean (${runs.length - conclusive.length} inconclusive)`, { evidenceId: afterShot });
     let regressionOk: boolean | null = null;
     if (repro.control) {
-      const c = await replay(repro.control);
+      const c = rc;
       const okMut = c.obs.mutations.filter((m) => (m.status ?? 0) > 0 && (m.status ?? 0) < 400);
       regressionOk = c.preError || c.obs.error ? null : c.obs.mutations.length === 1 && okMut.length === 1 && c.obs.pageErrors.length === 0;
       await record("Normal single-click journey still works", regressionOk, `${c.obs.mutations.length} request(s): ${c.obs.mutations.map((m) => `${m.method} ${m.path} → ${m.status ?? m.failed}`).join(", ") || "none"}`);
     } else {
-      const c = await replay({ kind: "goto", path: repro.trail.find((s) => s.kind === "goto")?.path ?? "/" });
+      const c = rc;
       regressionOk = c.preError || c.obs.error ? null : c.obs.pageErrors.length === 0 && (c.obs.navigationStatus ?? 0) < 400;
       await record("Journey still completes on patched build", regressionOk, c.preError ?? c.obs.error ?? `HTTP ${c.obs.navigationStatus}`);
     }
