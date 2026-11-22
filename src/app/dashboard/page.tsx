@@ -9,6 +9,8 @@ import { ProjectCard } from "@/components/dashboard/ProjectCard";
 import { ActivityFeed } from "@/components/dashboard/ActivityFeed";
 import { EmptyWonderland } from "@/components/dashboard/EmptyWonderland";
 import { timeAgo } from "@/lib/format";
+import { DemoResetCard } from "@/components/dashboard/DemoResetCard";
+import { demoConfig } from "@/lib/demo-reset";
 
 export default async function DashboardHome() {
   const user = await pageUser();
@@ -29,6 +31,13 @@ export default async function DashboardHome() {
     db.gitHubConnection.count({ where: { userId: user.id, status: "ACTIVE" } }),
   ]);
   const name = cu?.firstName ?? user.displayName ?? "there";
+  // Demo owners (DEMO_OWNER_EMAILS) get the Revert control right on the dashboard.
+  const owners = (process.env.DEMO_OWNER_EMAILS ?? "contact@elamaran.co").toLowerCase().split(",").map((e) => e.trim());
+  const emails = [user.email, ...(cu?.emailAddresses ?? []).map((e) => e.emailAddress)].filter(Boolean).map((e) => e!.toLowerCase());
+  const isDemoOwner = emails.some((e) => owners.includes(e));
+  const demoProject = isDemoOwner
+    ? await db.project.findFirst({ where: { userId: user.id, status: "ACTIVE", repositoryFullName: { equals: demoConfig().repo, mode: "insensitive" } } })
+    : null;
   return (
     <div className="space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -47,6 +56,8 @@ export default async function DashboardHome() {
           </Link>
         </div>
       </header>
+
+      {demoProject && <DemoResetCard projectId={demoProject.id} repo={demoProject.repositoryFullName!} compact />}
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Projects" value={cards.length} />

@@ -13,7 +13,8 @@ const nextConfig: NextConfig = {
   // Agents run inside the worker route; make sure runtime data files (e.g. playwright-core/browsers.json) ship with it.
   outputFileTracingIncludes: {
     "/api/worker": AGENT_RUNTIME_FILES,
-    "/api/evidence/[evidenceId]": AGENT_RUNTIME_FILES,
+    // Keys are globs: "[evidenceId]" would be read as a character class, so match the segment with "*".
+    "/api/evidence/*": AGENT_RUNTIME_FILES,
   },
   turbopack: {
     rules: {

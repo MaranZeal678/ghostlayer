@@ -1,3 +1,4 @@
+import { gunzipSync } from "node:zlib";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { handle, HttpError } from "@/lib/http";
@@ -21,8 +22,16 @@ export const GET = handle(async (_req: Request, { params }: Ctx) => {
     const { credentialsForUser, withCredentials } = await import("@/lib/credentials");
     // Recordings live under the Solari key that made them: the owner's own key if they set one, else the default.
     const bytes = await withCredentials(await credentialsForUser(user.id), () => solariBrowsers().sessions.downloadReplay(sessionId)).catch(() => null);
-    if (!bytes) throw new HttpError(404, "Replay not available yet (or expired)");
-    return new Response(Buffer.from(bytes), { headers: { "content-type": "application/x-ndjson", "cache-control": "private, max-age=300" } });
+    if (!bytes) throw new HttpError(404, "Session recording not available (Solari keeps recordings for a limited time)");
+    let buf = Buffer.from(bytes);
+    if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf); // recordings may arrive gzip-compressed
+    return new Response(buf, {
+      headers: {
+        "content-type": "application/x-ndjson",
+        "content-disposition": `attachment; filename="ghostlayer-${ev.label.toLowerCase().includes("investigator") ? "investigator" : "explorer"}-recording-${ev.id.slice(-6)}.rrweb.ndjson"`,
+        "cache-control": "private, max-age=300",
+      },
+    });
   }
   if (!ev.content) throw new HttpError(404, "Evidence has no content");
   return new Response(Buffer.from(ev.content), {
