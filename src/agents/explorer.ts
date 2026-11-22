@@ -278,6 +278,19 @@ export async function explore(h: PageHarness, ctx: ExploreContext) {
       await emit(scope, "EXPLORER", "planner.fallback", `AI planner unavailable, using heuristics: ${String(err).slice(0, 120)}`);
     }
     const byRef = new Map(elements.map((e) => [e.ref, e]));
+    // Deterministic guard rails on top of the planner: a "commit" outside any form (Add to cart, Proceed to
+    // checkout) is a forward click, not a form submission, and forward-moving controls always rank first.
+    const FORWARD_CLICK = /add to (cart|bag|basket)|checkout|proceed|continue|next|buy now/i;
+    for (const a of plan.actions) {
+      const el = byRef.get(a.ref);
+      if (!el) continue;
+      const text = el.text || el.label || "";
+      if (a.intent === "commit" && !el.inForm) a.intent = "interact";
+      if (el.tag !== "a" && !el.inForm && FORWARD_CLICK.test(text)) {
+        if (a.intent === "skip" || a.intent === "navigate") a.intent = "interact";
+        a.priority = 5;
+      }
+    }
     const acts = plan.actions
       .filter((a) => byRef.has(a.ref) && a.intent !== "skip")
       .filter((a) => {
