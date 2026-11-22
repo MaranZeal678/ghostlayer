@@ -47,7 +47,7 @@ export async function resetDemo(project: {
         owner,
         repo,
         issue_number: pr.number,
-        body: "🐇 Closed by GhostLayer **demo reset**. The repository was returned to its seeded-bug baseline so the demo can run again.",
+        body: "🐇 Closed by GhostLayer **revert**. The repository was returned to its seeded-bug baseline so the demo can run again.",
       })
       .catch(() => {});
     await octo.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo, pull_number: pr.number, state: "closed" });
@@ -79,7 +79,7 @@ export async function resetDemo(project: {
       const { data: commit } = await octo.request("POST /repos/{owner}/{repo}/git/commits", {
         owner,
         repo,
-        message: `chore: reset demo to seeded-bug baseline (${baselineSha.slice(0, 7)})\n\nRestores the tree of ${baselineSha} so GhostLayer can rediscover the seeded bugs.`,
+        message: `chore: revert to seeded-bug baseline (${baselineSha.slice(0, 7)})\n\nRestores the tree of ${baselineSha} so GhostLayer can rediscover the seeded bugs.`,
         tree: baselineCommit.data.tree.sha,
         parents: [head],
       });
@@ -95,7 +95,7 @@ export async function resetDemo(project: {
     const scans = await db.scan.findMany({ where: { projectId: project.id }, select: { id: true } });
     const repairs = await db.repairAttempt.findMany({ where: { projectId: project.id }, select: { id: true } });
     const targets = [...scans.map((s) => s.id), ...repairs.map((r) => r.id)];
-    await db.job.updateMany({ where: { targetId: { in: targets }, status: { in: ["QUEUED", "RUNNING"] } }, data: { status: "CANCELLED", lastError: "Demo reset" } });
+    await db.job.updateMany({ where: { targetId: { in: targets }, status: { in: ["QUEUED", "RUNNING"] } }, data: { status: "CANCELLED", lastError: "Reverted" } });
     clearedScans = (await db.scan.deleteMany({ where: { projectId: project.id } })).count;
   } else {
     // Keep history, but mark the PR records closed so the dashboard matches GitHub.
