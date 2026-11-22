@@ -658,7 +658,7 @@ export async function runVerifyReplay(repairId: string) {
     // Visiting the preview once with its token sets an auth cookie; later requests need no interception (fast, reliable).
     const bootstrapUrl = previewUrl.searchParams.has("slr_token") ? preview.url : `${previewUrl.origin}/?slr_token=${encodeURIComponent(token)}`;
     let reachable = 0;
-    for (let i = 0; i < 10 && !(reachable > 0 && reachable < 400); i++) {
+    for (let i = 0; i < 30 && !(reachable > 0 && reachable < 400); i++) {
       reachable = await fetch(bootstrapUrl).then((r) => r.status).catch(() => 0);
       if (!(reachable > 0 && reachable < 400)) await new Promise((r) => setTimeout(r, 1500));
     }
