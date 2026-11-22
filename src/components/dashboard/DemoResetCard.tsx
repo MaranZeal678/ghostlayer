@@ -46,7 +46,7 @@ export function DemoResetCard({ projectId, repo, compact = false }: { projectId:
         <h3 className="flex items-center gap-2 text-sm font-medium text-ink">
           <RotateCcw size={14} className="text-cyan" /> Revert
         </h3>
-        <p className="text-xs text-muted">Undo GhostLayer's PRs and changes on {repo} so you can run the scan → fix → PR demo again.</p>
+        <p className="text-xs text-muted">Undo GhostLayer&apos;s PRs and changes on {repo} so you can run the scan → fix → PR demo again.</p>
       </div>
       <label className="flex items-center gap-2 text-xs text-muted">
         <input type="checkbox" checked={clearHistory} onChange={(e) => setClearHistory(e.target.checked)} className="accent-violet" />

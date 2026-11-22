@@ -12,6 +12,7 @@ import { solariSandboxes } from "@/lib/solari";
 import type { Prisma, RepairStatus } from "@/generated/prisma/client";
 import { saveEvidence } from "./scan";
 import { enqueue } from "@/lib/queue";
+import { memoryEnabled, recallFix, repoHead, saveFix, sha256, treeOf, type CachedVerification } from "@/lib/memory";
 import {
   cloneRepo,
   ensureNode,
@@ -212,7 +213,7 @@ async function prepareSandbox(repairId: string, role: string, fullName: string, 
   }
 }
 
-type RepairMeta = { feedback?: string | null; prTitle?: string; branchSlug?: string };
+type RepairMeta = { feedback?: string | null; prTitle?: string; branchSlug?: string; recalledFrom?: string; treeSha?: string };
 
 /** Engineer job (REPAIR): one attempt at a patch; hands off to the Verifier job. */
 export async function runRepair(repairId: string) {
@@ -244,6 +245,40 @@ export async function runRepair(repairId: string) {
     await setStatus(repairId, "REJECTED", { completedAt: new Date(), errorMessage: feedback.slice(0, 1000) });
     await emit(scope, null, "repair.exhausted", `No verified fix after ${maxAttempts} attempt(s); human review needed`);
   };
+  // ── Verified-fix memory: same repo content + same bug → recall the patch the Verifier already approved ──
+  if (attempt === 1 && !verifierFeedback && memoryEnabled()) {
+    try {
+      const head = await repoHead(project.githubInstallationId, project.repositoryFullName);
+      const mem = await recallFix(project.repositoryFullName, head.treeSha, finding.fingerprint);
+      if (mem) {
+        const eng = await startAgentRun(scope, "ENGINEER", `Attempt 1: recall a verified fix for "${finding.title}" from memory`);
+        await emit(scope, "ENGINEER", "memory.recalled", `Recalled a previously verified fix from memory: same bug fingerprint, identical code (tree ${head.treeSha.slice(0, 7)} at ${head.headSha.slice(0, 7)}). Skipping regeneration; the Verifier will still re-prove the bug live.`, {
+          memoryId: mem.id,
+          files: (mem.files as { path: string }[]).map((f) => f.path),
+        });
+        await emit(scope, "ENGINEER", "patch.proposed", `Root cause (from memory): ${mem.rootCause ?? "see patch"}`, { files: (mem.files as { path: string }[]).map((f) => f.path) });
+        await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "DIFF", label: "Candidate patch (recalled from verified-fix memory)", mimeType: "text/x-diff", content: mem.diff });
+        await db.repairAttempt.update({
+          where: { id: repairId },
+          data: {
+            status: "VERIFYING",
+            baseSha: head.headSha,
+            diff: mem.diff,
+            files: mem.files as Prisma.InputJsonValue,
+            patchSummary: mem.patchSummary,
+            rootCause: mem.rootCause,
+            meta: { ...meta, feedback: null, prTitle: mem.prTitle, branchSlug: mem.branchSlug, recalledFrom: mem.id, treeSha: head.treeSha } as Prisma.InputJsonValue,
+          },
+        });
+        await db.fixMemory.update({ where: { id: mem.id }, data: { hits: { increment: 1 } } });
+        await finishAgentRun(eng.id, "COMPLETED", `Recalled verified fix (${(mem.files as unknown[]).length} file(s)) from memory`);
+        await enqueue("VERIFY", repairId, `verify:${repairId}:${attempt}`);
+        return;
+      }
+    } catch (err) {
+      await emit(scope, "ENGINEER", "memory.unavailable", `Memory lookup skipped: ${String((err as Error).message ?? err).slice(0, 120)}`);
+    }
+  }
   {
     // ── Engineer ────────────────────────────────────────────
     await setStatus(repairId, "PREPARING");
@@ -419,6 +454,46 @@ export async function runVerify(repairId: string) {
   let vsbx: Sbx | null = null;
   let keepSandbox = false;
   let browser: Awaited<ReturnType<typeof openSolariBrowser>> | null = null;
+  // ── Fast path: the patch came from the verified-fix memory and is byte-identical on identical code ──
+  // The bug is always re-proven live on the real site; build/test/patched-replay results are reused only
+  // for the exact same tree + exact same diff (content-addressed, like a build cache).
+  if (meta.recalledFrom) {
+    const mem = await db.fixMemory.findUnique({ where: { id: meta.recalledFrom } }).catch(() => null);
+    const cached = mem?.verification as CachedVerification | null | undefined;
+    if (mem && cached && mem.diffHash === sha256(diff) && mem.treeSha === meta.treeSha) {
+      try {
+        browser = await openSolariBrowser({ repairId, role: "verifier" });
+        await db.agentRun.update({ where: { id: ver.id }, data: { externalExecutionId: browser.sessionId } });
+        let b = await replayOnce(browser, origin, repro.trail, repro.trigger);
+        if (b.preError || b.obs.error) b = await replayOnce(browser, origin, repro.trail, repro.trigger);
+        const beforeEx = exhibits(repro.kind, b.obs);
+        const beforeShot = b.shot ? await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "before", mimeType: "image/jpeg", content: b.shot }) : undefined;
+        await record("Original failure reproduced (unpatched, live)", beforeEx.failed, `${origin}: ${beforeEx.detail}`, { evidenceId: beforeShot });
+        await browser.close();
+        browser = null;
+        const when = new Date(cached.verifiedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
+        const tag = `cached: identical tree ${mem.treeSha.slice(0, 7)} + identical patch ${mem.diffHash.slice(0, 7)}, verified ${when} PT`;
+        for (const c of cached.checks.filter((c) => !/Original failure reproduced/.test(c.name)))
+          await record(c.name, c.passed, `${c.detail} (${tag})`, { cached: true });
+        const afterShot = cached.afterShotJpeg
+          ? await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "after (patched build, from verified run)", mimeType: "image/jpeg", content: Buffer.from(cached.afterShotJpeg, "base64") })
+          : undefined;
+        const state: VerifyState = { agentRunId: ver.id, checks, beforeFailed: beforeEx.failed, beforeShot, testsOk: cached.testsOk, buildOk: cached.buildOk };
+        return await finalizeVerification({
+          repair,
+          state,
+          patchedOk: cached.patchedOk,
+          regressionOk: cached.regressionOk,
+          afterShot,
+          retryOrReject,
+          cachedVerdict: (cached.verdict as z.infer<typeof VerdictSchema> | null) ?? { recommendation: "approve", concerns: [], adversarialIdeas: [], reasoning: "cached" } as unknown as z.infer<typeof VerdictSchema>,
+        });
+      } finally {
+        await browser?.close();
+      }
+    }
+    await emit(scope, "VERIFIER", "memory.miss", "Recalled patch has no reusable verification for this exact code; running full independent verification");
+  }
   try {
     // 1+2 in parallel: re-prove the failure on the unpatched deployment while a fresh sandbox rebuilds base + diff.
     const readToken = await scopedRepoToken(project.githubInstallationId, project.repositoryId, { contents: "read", metadata: "read" });
@@ -637,15 +712,22 @@ async function finalizeVerification(args: {
   regressionOk: boolean | null;
   afterShot: string | undefined;
   retryOrReject: (feedback: string) => Promise<void>;
+  /** Verdict reused from the verified-fix memory (identical tree + identical diff); skips the LLM review. */
+  cachedVerdict?: z.infer<typeof VerdictSchema> | null;
 }) {
-  const { repair, state, patchedOk, regressionOk, afterShot, retryOrReject } = args;
+  const { repair, state, patchedOk, regressionOk, afterShot, retryOrReject, cachedVerdict } = args;
   const { finding } = repair;
   const repairId = repair.id;
   const scope = { repairAttemptId: repairId, scanId: finding.scanId };
   const meta = (repair.meta ?? {}) as RepairMeta;
   const checks = state.checks;
-  let verdict: z.infer<typeof VerdictSchema> | null = null;
-  try {
+  let verdict: z.infer<typeof VerdictSchema> | null = cachedVerdict ?? null;
+  if (cachedVerdict)
+    await emit(scope, "VERIFIER", "review.completed", `Adversarial review (cached for this exact diff): ${cachedVerdict.recommendation}${cachedVerdict.concerns.length ? ` — ${cachedVerdict.concerns[0]}` : " — no concrete defects found"}`, {
+      concerns: cachedVerdict.concerns,
+      cached: true,
+    });
+  else try {
     verdict = await structured({
       name: "verifier_review",
       schema: VerdictSchema,
@@ -686,6 +768,35 @@ Look for: race conditions still possible, guards that never reset (control stuck
     const slug = (meta.branchSlug ?? "repair").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "repair";
     await setStatus(repairId, "READY_FOR_REVIEW", { completedAt: new Date(), branchName: `ghostlayer/fix-${slug}` });
     await db.finding.update({ where: { id: finding.id }, data: { verificationStatus: "FIX_VERIFIED" } });
+    // Remember the verified fix (only fully re-verified runs are written; cached runs just reuse the entry).
+    if (!cachedVerdict && repair.project.repositoryFullName && repair.project.githubInstallationId && repair.baseSha && repair.diff)
+      try {
+        const treeSha = meta.treeSha ?? (await treeOf(repair.project.githubInstallationId, repair.project.repositoryFullName, repair.baseSha));
+        await saveFix({
+          repositoryFullName: repair.project.repositoryFullName,
+          treeSha,
+          fingerprint: finding.fingerprint,
+          diff: repair.diff,
+          files: repair.files,
+          rootCause: repair.rootCause,
+          patchSummary: repair.patchSummary,
+          prTitle: meta.prTitle,
+          branchSlug: meta.branchSlug,
+          verification: {
+            checks,
+            verdict,
+            testsOk: state.testsOk,
+            buildOk: state.buildOk,
+            patchedOk,
+            regressionOk,
+            afterShotJpeg: afterShot ? await db.evidenceArtifact.findUnique({ where: { id: afterShot }, select: { content: true } }).then((e) => (e?.content ? Buffer.from(e.content).toString("base64") : undefined)) : undefined,
+            verifiedAt: new Date().toISOString(),
+          },
+        });
+        await emit(scope, "VERIFIER", "memory.saved", "Saved this verified fix to memory: the same bug on the same code will be repaired from memory next time");
+      } catch (err) {
+        await emit(scope, "VERIFIER", "memory.unavailable", `Could not save fix to memory: ${String((err as Error).message ?? err).slice(0, 120)}`);
+      }
     await emit(scope, null, "repair.ready", "Return to Wonderland: the fix passed The Trial and is ready for your review");
     return;
   }

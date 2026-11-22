@@ -7,6 +7,7 @@ import { emit, finishAgentRun, startAgentRun } from "@/lib/events";
 import { assertSafeTarget } from "@/lib/url-safety";
 import { enqueue } from "@/lib/queue";
 import { currentCredentialSources } from "@/lib/credentials";
+import { memo } from "@/lib/memory";
 import type { Prisma } from "@/generated/prisma/client";
 import { openSolariBrowser, describeStep } from "./harness";
 import { explore, type Anomaly } from "./explorer";
@@ -169,16 +170,17 @@ export async function runInvestigate(scanId: string) {
   let investigatorFailed = false;
   if (signals.length) {
     const invRun = await startAgentRun(scope, "INVESTIGATOR", `Independently reproduce ${signals.length} signal(s) in fresh browser contexts`);
-    let invSession;
+    let invSession: Awaited<ReturnType<typeof openSolariBrowser>> | undefined;
     try {
       invSession = await openSolariBrowser({ scanId, role: "investigator" });
       await db.agentRun.update({ where: { id: invRun.id }, data: { externalExecutionId: invSession.sessionId } });
-      for (const a of signals) {
-        if (await isCancelled()) break;
+      // Signals are independent: investigate up to INVESTIGATE_CONCURRENCY at once (each replay is its own context).
+      const investigateOne = async (a: Anomaly) => {
+        if (await isCancelled()) return;
         await emit({ ...scope, agentRunId: invRun.id }, "INVESTIGATOR", "repro.started", `Reproducing: ${a.summary}`, {
           steps: [...a.trail, a.trigger].map(describeStep),
         });
-        const repro = await reproduce(invSession, origin, a, {
+        const repro = await reproduce(invSession!, origin, a, {
           saveScreenshot: saveShot,
           onRun: (r) =>
             emit({ ...scope, agentRunId: invRun.id }, "INVESTIGATOR", "repro.run", `${r.variant === "trigger" ? "Trigger" : "Control"} #${r.attempt}: ${r.failed ? "FAILURE" : "ok"} — ${r.detail}`, {
@@ -189,11 +191,18 @@ export async function runInvestigate(scanId: string) {
         });
         if (repro.triggerFailures === 0) {
           await emit({ ...scope, agentRunId: invRun.id }, "INVESTIGATOR", "repro.dismissed", `Could not reproduce (0/${repro.triggerRuns}); signal dismissed`);
-          continue;
+          return;
         }
         let report;
         try {
-          report = await writeReport(a, repro, project.websiteUrl);
+          // Same signal with the same reproduction outcome → reuse the report written for it before.
+          report = (
+            await memo(
+              "investigator-report:v1",
+              { site: project.websiteUrl, fp: a.fingerprint, summary: a.summary, t: [repro.triggerFailures, repro.triggerRuns, repro.controlFailures, repro.controlRuns] },
+              () => writeReport(a, repro, project.websiteUrl),
+            )
+          ).value;
         } catch (err) {
           report = {
             title: a.summary,
@@ -254,7 +263,12 @@ export async function runInvestigate(scanId: string) {
           severity: report.severity,
           confidence: repro.confidence,
         });
-      }
+      };
+      const queue = [...signals];
+      const width = Math.max(1, Number(process.env.INVESTIGATE_CONCURRENCY ?? 3));
+      await Promise.all(Array.from({ length: Math.min(width, queue.length) }, async () => {
+        for (let a = queue.shift(); a; a = queue.shift()) await investigateOne(a);
+      }));
       await finishAgentRun(invRun.id, "COMPLETED", `${findingsCount} finding(s) confirmed or reproduced`);
     } catch (err) {
       investigatorFailed = true;

@@ -379,3 +379,35 @@ model Job {
 
   @@index([status, runAfter])
 }
+
+/// Verified-fix memory: a patch the independent Verifier approved, keyed by repo + git TREE (content, so it survives
+/// Revert commits that restore the same files) + bug fingerprint. The Engineer recalls it instead of regenerating;
+/// the Verifier re-proves the bug live and reuses checks only for the identical tree + identical diff (content-addressed).
+model FixMemory {
+  id                 String   @id @default(cuid())
+  repositoryFullName String
+  treeSha            String
+  fingerprint        String
+  diff               String
+  diffHash           String
+  files              Json
+  rootCause          String?
+  patchSummary       String?
+  prTitle            String?
+  branchSlug         String?
+  verification       Json?
+  hits               Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([repositoryFullName, treeSha, fingerprint])
+}
+
+/// Content-addressed agent memo (Explorer page plans, Investigator reports), keyed by a hash of the exact inputs.
+model AgentMemo {
+  key       String   @id
+  value     Json
+  hits      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

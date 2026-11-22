@@ -6,6 +6,7 @@ import { z } from "zod";
 import { structured } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { emit } from "@/lib/events";
+import { memo } from "@/lib/memory";
 import { describeStep, type Observation, type PageElement, type PageHarness, type Step } from "./harness";
 
 export type AnomalyKind =
@@ -268,8 +269,12 @@ export async function explore(h: PageHarness, ctx: ExploreContext) {
     const text = await h.bodyText();
     let plan: Plan;
     try {
-      plan = await planPage(next.path, title, text, elements, [...visited]);
-      await emit(scope, "EXPLORER", "page.understood", `${next.path}: ${plan.pagePurpose}`, {
+      // Content-addressed: an identical page (same path, text and controls) reuses the plan it got before.
+      const memoed = await memo("explorer-plan:v1", { path: next.path, title, text, elements, visited: [...visited] }, () =>
+        planPage(next.path, title, text, elements, [...visited]),
+      );
+      plan = memoed.value;
+      await emit(scope, "EXPLORER", "page.understood", `${next.path}: ${plan.pagePurpose}${memoed.cached ? " (page unchanged; plan from memory)" : ""}`, {
         path: next.path,
         planned: plan.actions.filter((a) => a.intent !== "skip").length,
       });
