@@ -24,7 +24,16 @@ export function eventStream(
       let idleTicks = 0;
       // End before the serverless limit; EventSource reconnects with Last-Event-ID and resumes seamlessly.
       const deadline = Date.now() + 240_000;
+      let tick = 0;
       while (!closed && Date.now() < deadline) {
+        // Self-healing: if a wake-up was lost (deploy, network), a watched page re-kicks the worker for stale jobs.
+        if (++tick % 8 === 0) {
+          const stale = await db.job.count({ where: { status: "QUEUED", runAfter: { lt: new Date(Date.now() - 10_000) } } });
+          if (stale) {
+            const { kickWorker } = await import("./jobs");
+            await kickWorker();
+          }
+        }
         const events = await db.agentEvent.findMany({
           where: { ...where, id: { gt: cursor } },
           orderBy: { id: "asc" },
