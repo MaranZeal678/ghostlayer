@@ -189,7 +189,12 @@ export class PageHarness {
       const res = await r.response().catch(() => null);
       settle(r.url(), r.method(), { status: res?.status() ?? 0 });
     });
-    p.on("requestfailed", (r) => settle(r.url(), r.method(), { failed: r.failure()?.errorText ?? "failed" }));
+    p.on("requestfailed", async (r) => {
+      // Chrome reports an unread error response as "aborted": keep the real HTTP status when there was one.
+      const res = await r.response().catch(() => null);
+      if (res) settle(r.url(), r.method(), { status: res.status() });
+      else settle(r.url(), r.method(), { failed: r.failure()?.errorText ?? "failed" });
+    });
     p.on("console", (m) => {
       if (m.type() === "error") this.consoleErrors.push(m.text().slice(0, 400));
     });
