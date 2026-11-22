@@ -23,7 +23,7 @@ const STATUS_STYLE: Record<Status, string> = {
 export function Verification() {
   return (
     <section id="verification" aria-labelledby="verify-title" className="relative scroll-mt-20">
-      <div className="mx-auto max-w-6xl px-5 py-24 sm:px-8 md:py-32">
+      <div className="mx-auto max-w-7xl px-5 py-24 sm:px-8 md:py-32">
         <div className="grid gap-12 lg:grid-cols-[0.85fr_1.15fr]">
           <div className="lg:sticky lg:top-28 lg:self-start">
             <SectionHeading
@@ -54,23 +54,23 @@ export function Verification() {
           <Reveal delay={0.1}>
             <div className="glass overflow-hidden rounded-2xl">
               <div className="flex items-center justify-between border-b border-line px-5 py-3">
-                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">The Trial · verification report</p>
-                <span className="font-mono text-[10px] uppercase tracking-wider text-faint">Example</span>
+                <p className="font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-faint">The Trial · verification report</p>
+                <span className="font-mono text-[0.625rem] uppercase tracking-wider text-faint">Example</span>
               </div>
               <ol className="divide-y divide-line">
                 {CHECKS.map((c, i) => (
                   <li key={c.name} className="flex items-center gap-4 px-5 py-4">
-                    <span className="w-5 font-mono text-[11px] text-faint">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="w-5 font-mono text-[0.6875rem] text-faint">{String(i + 1).padStart(2, "0")}</span>
                     <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-bg/60 text-muted">
                       <c.icon className="h-4 w-4" aria-hidden />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-medium text-ink">{c.name}</p>
+                      <p className="text-[0.9375rem] font-medium text-ink">{c.name}</p>
                       <p className="truncate text-sm text-muted">{c.detail}</p>
                     </div>
                     <span
                       className={cn(
-                        "shrink-0 rounded-full border px-2.5 py-1 font-mono text-[11px] whitespace-nowrap",
+                        "shrink-0 rounded-full border px-2.5 py-1 font-mono text-[0.6875rem] whitespace-nowrap",
                         STATUS_STYLE[c.status],
                       )}
                     >

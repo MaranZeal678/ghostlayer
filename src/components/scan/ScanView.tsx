@@ -157,7 +157,7 @@ export function ScanView({ projectId, scanId, projectName, websiteUrl, repoConne
           ["Repairs active", snapshot?.activeRepairs ?? 0],
         ].map(([l, v]) => (
           <div key={l as string} className="glass rounded-xl px-3 py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-faint">{l}</div>
+            <div className="text-[0.625rem] uppercase tracking-wider text-faint">{l}</div>
             <motion.div key={String(v)} initial={{ opacity: 0.4, y: -3 }} animate={{ opacity: 1, y: 0 }} className="font-mono text-xl">{v as number}</motion.div>
           </div>
         ))}
@@ -177,7 +177,7 @@ export function ScanView({ projectId, scanId, projectName, websiteUrl, repoConne
                   <span className="text-sm font-medium">{a.name}</span>
                   <span className={cn("ml-auto h-2 w-2 rounded-full", st === "running" ? "animate-pulse bg-cyan" : st === "completed" ? "bg-emerald" : st === "failed" ? "bg-coral" : st === "waiting" ? "bg-amber" : "bg-faint/50")} />
                 </div>
-                <div className="mt-0.5 text-[11px] text-faint">{a.role}</div>
+                <div className="mt-0.5 text-[0.6875rem] text-faint">{a.role}</div>
                 <AnimatePresence mode="wait">
                   {last && (
                     <motion.div key={last.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-1.5 line-clamp-2 text-xs text-muted">
@@ -212,7 +212,7 @@ export function ScanView({ projectId, scanId, projectName, websiteUrl, repoConne
                     <div className="relative overflow-hidden rounded-xl border border-line bg-black/40">
                       <div className="flex items-center gap-1.5 border-b border-line bg-surface-2/80 px-3 py-1.5">
                         <span className="h-2 w-2 rounded-full bg-coral/60" /><span className="h-2 w-2 rounded-full bg-amber/60" /><span className="h-2 w-2 rounded-full bg-emerald/60" />
-                        <span className="ml-2 truncate font-mono text-[11px] text-muted">{shown.caption}</span>
+                        <span className="ml-2 truncate font-mono text-[0.6875rem] text-muted">{shown.caption}</span>
                         <Badge tone="cyan" className="ml-auto shrink-0">Captured {clock(shown.t)}</Badge>
                       </div>
                       <AnimatePresence mode="wait">
@@ -228,7 +228,7 @@ export function ScanView({ projectId, scanId, projectName, websiteUrl, repoConne
                         </button>
                       ))}
                     </div>
-                    <p className="text-[11px] text-faint">Real screenshots captured by the agents&apos; Solari cloud browsers (not a video stream). Full session recordings are saved as evidence.</p>
+                    <p className="text-[0.6875rem] text-faint">Real screenshots captured by the agents&apos; Solari cloud browsers (not a video stream). Full session recordings are saved as evidence.</p>
                   </>
                 ) : (
                   <div className="grid h-full place-items-center text-center text-sm text-muted">
@@ -271,7 +271,7 @@ export function ScanView({ projectId, scanId, projectName, websiteUrl, repoConne
                     <Badge tone={severityTone(f.severity)}>{f.severity}</Badge>
                     <Badge tone={statusTone(f.confidence)}>{label(f.confidence)}</Badge>
                   </div>
-                  <div className="mt-1 font-mono text-[10px] text-faint">{(() => { try { return new URL(f.affectedUrl).pathname; } catch { return f.affectedUrl; } })()} · {(f.reproductionStats as any)?.triggerFailures}/{(f.reproductionStats as any)?.triggerRuns} repro</div>
+                  <div className="mt-1 font-mono text-[0.625rem] text-faint">{(() => { try { return new URL(f.affectedUrl).pathname; } catch { return f.affectedUrl; } })()} · {(f.reproductionStats as any)?.triggerFailures}/{(f.reproductionStats as any)?.triggerRuns} repro</div>
                   <div className="mt-2">
                     {r ? (
                       <Link href={`/dashboard/projects/${projectId}/findings/${f.id}`}>
@@ -283,7 +283,7 @@ export function ScanView({ projectId, scanId, projectName, websiteUrl, repoConne
                         {busy === f.id ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />} Repair autonomously
                       </Button>
                     ) : (
-                      <span className="text-[11px] text-faint">{repoConnected ? "Needs human review" : "Connect a repo to enable repair"}</span>
+                      <span className="text-[0.6875rem] text-faint">{repoConnected ? "Needs human review" : "Connect a repo to enable repair"}</span>
                     )}
                   </div>
                 </motion.div>

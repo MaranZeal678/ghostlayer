@@ -38,7 +38,7 @@ export function FindingCard({ f, i = 0 }: { f: FindingLite; i?: number }) {
             <Badge>{f.category}</Badge>
             {repair && <Badge tone={statusTone(repair.status)}>Repair: {label(repair.status)}</Badge>}
           </div>
-          <div className="mt-1.5 font-mono text-[11px] text-faint">
+          <div className="mt-1.5 font-mono text-[0.6875rem] text-faint">
             {path} · {timeAgo(f.createdAt)}
           </div>
         </div>

@@ -30,6 +30,9 @@ export async function reclaimStaleSandboxes(keep: string[] = []) {
   for await (const s of client.listAll()) {
     if (s.metadata?.app !== "ghostlayer" || keep.includes(s.sandboxId)) continue;
     if (s.state === "stopped") continue;
+    // Only reclaim sandboxes older than the serverless job limit; younger ones may belong to a live repair.
+    const born = Number(s.metadata?.createdAt ?? 0);
+    if (born && Date.now() - born < 6 * 60_000) continue;
     await client.kill(s.sandboxId).catch(() => {});
     killed++;
   }
@@ -41,9 +44,19 @@ export async function openSandbox(metadata: Record<string, string>) {
     return await createSandbox(metadata);
   } catch (err) {
     if (!/concurren|too many|limit/i.test(String((err as Error).message ?? err))) throw err;
-    const killed = await reclaimStaleSandboxes();
-    console.warn(`[sandbox] concurrency limit hit; reclaimed ${killed} stale GhostLayer sandbox(es), retrying`);
-    return createSandbox(metadata);
+    // Parallel repairs share a small sandbox quota: reclaim leaked ones, otherwise wait for a slot (~4 min).
+    for (let i = 0; ; i++) {
+      if (i % 6 === 0) {
+        const killed = await reclaimStaleSandboxes();
+        if (killed) console.warn(`[sandbox] concurrency limit hit; reclaimed ${killed} stale GhostLayer sandbox(es)`);
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+      try {
+        return await createSandbox(metadata);
+      } catch (e) {
+        if (i >= 48 || !/concurren|too many|limit/i.test(String((e as Error).message ?? e))) throw e;
+      }
+    }
   }
 }
 
@@ -54,7 +67,7 @@ async function createSandbox(metadata: Record<string, string>) {
     memMb: 8192,
     idleTimeoutMs: 30 * 60_000,
     lifecycle: { onTimeout: "kill" },
-    metadata: { app: "ghostlayer", ...metadata },
+    metadata: { app: "ghostlayer", createdAt: String(Date.now()), ...metadata },
   });
   await sbx.connect();
   return sbx;

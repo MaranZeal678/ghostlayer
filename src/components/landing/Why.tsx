@@ -26,7 +26,7 @@ const POINTS = [
 
 export function Why() {
   return (
-    <section aria-labelledby="why-title" className="relative mx-auto max-w-6xl px-5 py-24 sm:px-8 md:py-32">
+    <section aria-labelledby="why-title" className="relative mx-auto max-w-7xl px-5 py-24 sm:px-8 md:py-32">
       <SectionHeading
         id="why-title"
         eyebrow="Why GhostLayer?"
@@ -44,7 +44,7 @@ export function Why() {
             <div className="group h-full bg-surface/40 p-7 transition-colors hover:bg-surface/80 sm:p-8">
               <p.icon className="h-5 w-5 text-lavender/80 transition-colors group-hover:text-cyan" aria-hidden />
               <h3 className="mt-5 text-lg font-medium text-ink">{p.title}</h3>
-              <p className="mt-2 text-[15px] leading-relaxed text-muted">{p.body}</p>
+              <p className="mt-2 text-[0.9375rem] leading-relaxed text-muted">{p.body}</p>
             </div>
           </Reveal>
         ))}

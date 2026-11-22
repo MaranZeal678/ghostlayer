@@ -36,7 +36,7 @@ export function ActivityFeed({ events, compact = true }: { events: FeedEvent[]; 
         {events.map((e) => {
           const body = (
             <div className={cn("rounded-lg border-l-2 py-1 pl-3", eventTone(e.eventType))}>
-              <div className="flex items-center gap-2 text-[11px]">
+              <div className="flex items-center gap-2 text-[0.6875rem]">
                 <span className={cn("font-mono uppercase tracking-wider", AGENT_COLOR[e.agentType ?? ""] ?? "text-faint")}>{e.agentType ?? "system"}</span>
                 <span className="font-mono text-faint" suppressHydrationWarning>{clock(e.timestamp)}</span>
               </div>

@@ -41,6 +41,20 @@
 html {
   color-scheme: dark;
   background: var(--gl-bg);
+  /* Scale the whole rem-based UI up on large displays so it doesn't feel zoomed out. */
+  font-size: 100%;
+}
+@media (min-width: 1280px) {
+  html { font-size: 106.25%; }
+}
+@media (min-width: 1536px) {
+  html { font-size: 118.75%; }
+}
+@media (min-width: 1800px) {
+  html { font-size: 131.25%; }
+}
+@media (min-width: 2200px) {
+  html { font-size: 150%; }
 }
 
 body {

@@ -29,7 +29,7 @@ const NET = [
 export function LookingGlass() {
   return (
     <section aria-labelledby="glass-title" className="relative overflow-hidden border-y border-line bg-surface/20">
-      <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 py-24 sm:px-8 md:py-32 lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="mx-auto grid max-w-7xl items-center gap-14 px-5 py-24 sm:px-8 md:py-32 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
           <SectionHeading
             id="glass-title"
@@ -50,8 +50,8 @@ export function LookingGlass() {
                     <f.icon className="h-4 w-4" aria-hidden />
                   </span>
                   <div>
-                    <h3 className="text-[15px] font-medium text-ink">{f.title}</h3>
-                    <p className="mt-1 text-[15px] leading-relaxed text-muted">{f.body}</p>
+                    <h3 className="text-[0.9375rem] font-medium text-ink">{f.title}</h3>
+                    <p className="mt-1 text-[0.9375rem] leading-relaxed text-muted">{f.body}</p>
                   </div>
                 </li>
               </Reveal>
@@ -66,8 +66,8 @@ export function LookingGlass() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-coral opacity-60" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-coral" />
               </span>
-              <p className="font-mono text-[11px] text-muted">Looking Glass · session replay</p>
-              <span className="ml-auto font-mono text-[10px] uppercase tracking-wider text-faint">Illustrative</span>
+              <p className="font-mono text-[0.6875rem] text-muted">Looking Glass · session replay</p>
+              <span className="ml-auto font-mono text-[0.625rem] uppercase tracking-wider text-faint">Illustrative</span>
             </div>
 
             <div className="grid gap-px bg-line sm:grid-cols-[1.4fr_1fr]">
@@ -82,7 +82,7 @@ export function LookingGlass() {
                   </div>
                   <div className="mt-4 flex items-center justify-between">
                     <div className="h-2 w-16 rounded bg-line-strong" />
-                    <div className="relative rounded-md bg-violet/80 px-3 py-1.5 text-[11px] font-medium text-white">
+                    <div className="relative rounded-md bg-violet/80 px-3 py-1.5 text-[0.6875rem] font-medium text-white">
                       Place order
                       <span aria-hidden className="absolute -right-2 -top-2 h-5 w-5 rounded-full border-2 border-cyan/80" />
                       <span aria-hidden className="absolute -right-3 -top-3 h-7 w-7 rounded-full border border-cyan/40" />
@@ -101,8 +101,8 @@ export function LookingGlass() {
 
               {/* network log */}
               <div className="bg-bg/80 p-4">
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">Network</p>
-                <ul className="mt-3 space-y-2 font-mono text-[11px]">
+                <p className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-faint">Network</p>
+                <ul className="mt-3 space-y-2 font-mono text-[0.6875rem]">
                   {NET.map(([m, p, s, t, c], n) => (
                     <li key={n} className={`flex items-center gap-2 ${c}`}>
                       <span className="w-9 text-faint">{m}</span>
@@ -112,7 +112,7 @@ export function LookingGlass() {
                     </li>
                   ))}
                 </ul>
-                <div className="mt-4 rounded-md border border-coral/30 bg-coral/5 p-2.5 text-[11px] leading-relaxed text-coral">
+                <div className="mt-4 rounded-md border border-coral/30 bg-coral/5 p-2.5 text-[0.6875rem] leading-relaxed text-coral">
                   Cheshire Signal — suspicious finding: duplicate order created
                 </div>
               </div>
@@ -126,7 +126,7 @@ export function LookingGlass() {
                 <div className="absolute left-[64%] top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-bg bg-cyan" />
                 <div className="absolute left-[61%] top-1/2 h-2 w-0.5 -translate-y-1/2 bg-coral" />
               </div>
-              <span className="font-mono text-[10px] text-faint">00:41 / 01:04</span>
+              <span className="font-mono text-[0.625rem] text-faint">00:41 / 01:04</span>
             </div>
           </figure>
         </Reveal>

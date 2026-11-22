@@ -27,7 +27,7 @@ export function StartScanButton({ projectId, disabled }: { projectId: string; di
         {busy ? <Loader2 size={18} className="animate-spin" /> : <Rabbit size={18} className="transition-transform group-hover:translate-y-0.5" />}
         Start autonomous scan
       </Button>
-      <span className="text-[11px] italic text-faint">Enter the rabbit hole</span>
+      <span className="text-[0.6875rem] italic text-faint">Enter the rabbit hole</span>
       {error && <span className="text-xs text-coral">{error}</span>}
     </div>
   );

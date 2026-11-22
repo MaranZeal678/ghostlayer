@@ -10,7 +10,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="bg-atmosphere min-h-screen md:flex">
       <Sidebar githubConnected={conn > 0} />
-      <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
+      <main className="mx-auto w-full max-w-[87.5rem] flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
     </div>
   );
 }

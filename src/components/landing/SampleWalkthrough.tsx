@@ -33,7 +33,7 @@ const TONE: Record<Step["tone"], string> = {
 };
 
 function Mono({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("font-mono text-[12px] leading-relaxed", className)}>{children}</div>;
+  return <div className={cn("font-mono text-[0.75rem] leading-relaxed", className)}>{children}</div>;
 }
 
 const STEPS: Step[] = [
@@ -78,12 +78,12 @@ const STEPS: Step[] = [
         <div className="flex gap-2">
           {[1, 2, 3].map((n) => (
             <div key={n} className="flex-1 rounded-lg border border-amber/25 bg-amber/5 px-3 py-2">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-faint">Run {n}</p>
-              <p className="mt-1 font-mono text-[12px] text-amber">2 orders</p>
+              <p className="font-mono text-[0.625rem] uppercase tracking-wider text-faint">Run {n}</p>
+              <p className="mt-1 font-mono text-[0.75rem] text-amber">2 orders</p>
             </div>
           ))}
         </div>
-        <p className="text-[13px] text-muted">Deterministic. Evidence saved: replay, screenshots, network log.</p>
+        <p className="text-[0.8125rem] text-muted">Deterministic. Evidence saved: replay, screenshots, network log.</p>
       </div>
     ),
   },
@@ -95,7 +95,7 @@ const STEPS: Step[] = [
     title: "Engineer patches it in an isolated sandbox",
     body: (
       <div className="overflow-hidden rounded-lg border border-line bg-bg/70">
-        <p className="border-b border-line px-3 py-1.5 font-mono text-[10px] text-faint">components/CheckoutButton.tsx</p>
+        <p className="border-b border-line px-3 py-1.5 font-mono text-[0.625rem] text-faint">components/CheckoutButton.tsx</p>
         <Mono className="px-3 py-2">
           <p className="text-coral/90">- &lt;button onClick=&#123;placeOrder&#125;&gt;</p>
           <p className="text-emerald">+ const [pending, start] = useTransition();</p>
@@ -112,7 +112,7 @@ const STEPS: Step[] = [
     tone: "emerald",
     title: "Verifier tries to prove the fix wrong — and can’t",
     body: (
-      <ul className="space-y-1.5 text-[13px]">
+      <ul className="space-y-1.5 text-[0.8125rem]">
         {[
           ["Build", "passed"],
           ["Existing tests", "42 / 42"],
@@ -123,7 +123,7 @@ const STEPS: Step[] = [
             <span className="flex items-center gap-2 text-muted">
               <Check className="h-3.5 w-3.5 text-emerald" aria-hidden /> {k}
             </span>
-            <span className="font-mono text-[12px] text-emerald">{v}</span>
+            <span className="font-mono text-[0.75rem] text-emerald">{v}</span>
           </li>
         ))}
       </ul>
@@ -137,14 +137,14 @@ const STEPS: Step[] = [
     title: "Draft pull request opened for review",
     body: (
       <div className="rounded-lg border border-line bg-bg/70 p-3">
-        <p className="flex items-center gap-2 text-[13px] text-ink">
+        <p className="flex items-center gap-2 text-[0.8125rem] text-ink">
           <GitPullRequestDraft className="h-4 w-4 text-faint" aria-hidden />
           fix(checkout): prevent duplicate orders on double submit
         </p>
-        <p className="mt-2 font-mono text-[11px] text-faint">
+        <p className="mt-2 font-mono text-[0.6875rem] text-faint">
           #128 · Draft · ghostlayer/fix-duplicate-order → main
         </p>
-        <p className="mt-2 inline-flex rounded-full border border-amber/30 bg-amber/10 px-2 py-0.5 text-[11px] text-amber">
+        <p className="mt-2 inline-flex rounded-full border border-amber/30 bg-amber/10 px-2 py-0.5 text-[0.6875rem] text-amber">
           Human review required
         </p>
       </div>
@@ -185,10 +185,10 @@ export function SampleWalkthrough() {
           <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
           <span className="h-2.5 w-2.5 rounded-full bg-line-strong" />
         </div>
-        <p className="hidden min-w-0 flex-1 truncate rounded-md bg-bg/60 px-2.5 py-1 font-mono text-[11px] text-faint sm:block lg:hidden xl:block">
+        <p className="hidden min-w-0 flex-1 truncate rounded-md bg-bg/60 px-2.5 py-1 font-mono text-[0.6875rem] text-faint sm:block lg:hidden xl:block">
           demo-shop.example/checkout
         </p>
-        <span className="ml-auto shrink-0 rounded-full border border-amber/30 bg-amber/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-amber">
+        <span className="ml-auto shrink-0 rounded-full border border-amber/30 bg-amber/10 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-wider text-amber">
           Sample walkthrough · not a live scan
         </span>
       </div>
@@ -207,11 +207,11 @@ export function SampleWalkthrough() {
               <span className={cn("inline-flex h-7 w-7 items-center justify-center rounded-lg border", TONE[step.tone])}>
                 <Icon className="h-3.5 w-3.5" aria-hidden />
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">
+              <p className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-faint">
                 Step {i + 1} / {STEPS.length}
               </p>
             </div>
-            <h3 className="mt-3 text-[15px] font-medium text-ink">{step.title}</h3>
+            <h3 className="mt-3 text-[0.9375rem] font-medium text-ink">{step.title}</h3>
             <div className="mt-3">{step.body}</div>
           </motion.div>
         </AnimatePresence>

@@ -24,7 +24,7 @@ function Check({ name, value, detail }: { name: string; value: boolean | null | 
         <div className="text-sm">{name}</div>
         {detail && <div className="truncate text-xs text-muted" title={detail}>{detail}</div>}
       </div>
-      <span className={cn("ml-auto text-[11px] whitespace-nowrap", value === true ? "text-emerald" : value === false ? "text-coral" : "text-faint")}>{value === true ? "passed" : value === false ? "failed" : "not run"}</span>
+      <span className={cn("ml-auto text-[0.6875rem] whitespace-nowrap", value === true ? "text-emerald" : value === false ? "text-coral" : "text-faint")}>{value === true ? "passed" : value === false ? "failed" : "not run"}</span>
     </div>
   );
 }
@@ -147,7 +147,7 @@ export function FindingView({ finding, evidence, repair: initialRepair, repoConn
                 <button key={e.id} onClick={() => setZoom(e.id)} className="group overflow-hidden rounded-lg border border-line text-left hover:border-line-strong">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/api/evidence/${e.id}`} alt={e.label} className="aspect-video w-full object-cover object-top" />
-                  <div className="truncate px-2 py-1 text-[11px] text-muted">{e.label}</div>
+                  <div className="truncate px-2 py-1 text-[0.6875rem] text-muted">{e.label}</div>
                 </button>
               ))}
             </div>
@@ -192,7 +192,7 @@ export function FindingView({ finding, evidence, repair: initialRepair, repoConn
               <div className="mt-3 space-y-3">
                 <div className="flex flex-wrap gap-1">
                   {REPAIR_STEPS.slice(0, 7).map((s, i) => (
-                    <span key={s} className={cn("rounded-full px-2 py-0.5 text-[10px]", stepIdx === i && !["READY_FOR_REVIEW"].includes(s) ? "bg-violet/25 text-ink" : stepIdx > i || ["PR_CREATED", "READY_FOR_REVIEW"].includes(repair.status) ? "bg-emerald/10 text-emerald" : "bg-white/5 text-faint")}>
+                    <span key={s} className={cn("rounded-full px-2 py-0.5 text-[0.625rem]", stepIdx === i && !["READY_FOR_REVIEW"].includes(s) ? "bg-violet/25 text-ink" : stepIdx > i || ["PR_CREATED", "READY_FOR_REVIEW"].includes(repair.status) ? "bg-emerald/10 text-emerald" : "bg-white/5 text-faint")}>
                       {label(s)}
                     </span>
                   ))}
@@ -213,6 +213,11 @@ export function FindingView({ finding, evidence, repair: initialRepair, repoConn
           {v && (
             <Card className="space-y-2 p-5">
               <h2 className="flex items-center gap-2 text-sm font-medium">⚖️ The Trial · independent verification</h2>
+              {v?.checks?.cached && (
+                <p className="rounded-lg border border-cyan/30 bg-cyan/5 px-3 py-2 text-xs text-cyan">
+                  ♻ Verified-fix memory: the bug was re-proven live just now; build, tests and patched replays are reused from the verified run on identical code + identical patch ({String(v.checks.cached.treeSha).slice(0, 7)} · {String(v.checks.cached.diffHash).slice(0, 7)}).
+                </p>
+              )}
               <p className="text-xs text-muted">Each check is reported separately. There is no single &ldquo;100% fixed&rdquo; score.</p>
               <Check name="Build" value={v.buildPassed} />
               <Check name="Existing tests" value={v.existingTestsPassed} />
@@ -271,7 +276,7 @@ export function FindingView({ finding, evidence, repair: initialRepair, repoConn
       {repairEvidence.before && repairEvidence.after && (
         <Card className="p-5">
           <h2 className="mb-1 text-sm font-medium text-faint uppercase tracking-wider">Before &amp; after · same journey, replayed by the Verifier</h2>
-          <p className="mb-3 text-xs text-muted">Left: the live (unpatched) site. Right: the patched build running in a Solari sandbox. Drag to compare.</p>
+          <p className="mb-3 text-xs text-muted">Left: the live (unpatched) site. Right: the patched build running in a Solari sandbox{v?.checks?.cached ? " (captured in the verified run being reused)" : ""}. Drag to compare.</p>
           <BeforeAfter before={`/api/evidence/${repairEvidence.before}`} after={`/api/evidence/${repairEvidence.after}`} />
         </Card>
       )}

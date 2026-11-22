@@ -42,7 +42,7 @@ export function Nav() {
         scrolled || open ? "border-b border-line bg-bg/75 backdrop-blur-xl" : "border-b border-transparent",
       )}
     >
-      <nav aria-label="Primary" className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
+      <nav aria-label="Primary" className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
         <Link href="/" className="rounded-md" aria-label="GhostLayer home">
           <Wordmark />
         </Link>

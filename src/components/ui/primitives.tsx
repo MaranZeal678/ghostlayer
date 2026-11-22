@@ -38,7 +38,7 @@ const tone = {
 export type Tone = keyof typeof tone;
 
 export function Badge({ tone: t = "slate", className, ...props }: HTMLAttributes<HTMLSpanElement> & { tone?: Tone }) {
-  return <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide", tone[t], className)} {...props} />;
+  return <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium tracking-wide", tone[t], className)} {...props} />;
 }
 
 export function severityTone(s: string): Tone {

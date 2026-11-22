@@ -111,7 +111,7 @@ export function HowItWorks() {
   return (
     <section id="how" aria-labelledby="how-title" className="relative scroll-mt-20 border-y border-line bg-surface/20">
       <div className="grid-lines pointer-events-none absolute inset-0 opacity-40 [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
-      <div className="relative mx-auto max-w-6xl px-5 py-24 sm:px-8 md:py-32">
+      <div className="relative mx-auto max-w-7xl px-5 py-24 sm:px-8 md:py-32">
         <SectionHeading
           id="how-title"
           eyebrow="How it works"
@@ -157,7 +157,7 @@ export function HowItWorks() {
                     <s.icon className="h-4 w-4" aria-hidden />
                   </span>
                   <span className={cn("text-xs font-medium sm:text-sm", on ? "text-ink" : "text-muted")}>{s.name}</span>
-                  <span className="hidden font-mono text-[10px] uppercase tracking-wider text-faint md:block">
+                  <span className="hidden font-mono text-[0.625rem] uppercase tracking-wider text-faint md:block">
                     0{i + 1}
                   </span>
                 </button>
@@ -177,14 +177,14 @@ export function HowItWorks() {
               className="glass grid gap-8 rounded-2xl p-6 sm:p-8 md:grid-cols-[1.3fr_1fr]"
             >
               <div>
-                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">
+                <p className="font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-faint">
                   Stage 0{active + 1} · {stage.agent}
                 </p>
                 <h3 className="mt-3 text-2xl font-medium tracking-tight text-ink">{stage.name}</h3>
-                <p className="mt-3 text-[15px] leading-relaxed text-muted">{stage.summary}</p>
+                <p className="mt-3 text-[0.9375rem] leading-relaxed text-muted">{stage.summary}</p>
                 <ul className="mt-5 space-y-2.5">
                   {stage.bullets.map((b) => (
-                    <li key={b} className="flex gap-3 text-[15px] text-ink/90">
+                    <li key={b} className="flex gap-3 text-[0.9375rem] text-ink/90">
                       <span aria-hidden className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan" />
                       {b}
                     </li>
@@ -193,12 +193,12 @@ export function HowItWorks() {
               </div>
               <div className="flex flex-col justify-between gap-6 rounded-xl border border-line bg-bg/50 p-5">
                 <div>
-                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">In Wonderland terms</p>
+                  <p className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-faint">In Wonderland terms</p>
                   <p className="mt-2 font-display text-2xl italic text-lavender">{stage.theme}</p>
                   <p className="mt-1 text-sm text-muted">{stage.plain}</p>
                 </div>
                 <div>
-                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Output</p>
+                  <p className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-faint">Output</p>
                   <p className="mt-2 text-sm text-ink">{stage.output}</p>
                 </div>
               </div>

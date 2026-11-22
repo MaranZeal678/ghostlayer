@@ -54,7 +54,7 @@ export async function runPublish(repairId: string) {
       const { data: commit } = await octo.request("POST /repos/{owner}/{repo}/git/commits", {
         owner,
         repo,
-        message: `${prTitle}\n\nGhostLayer repair for: ${finding.title}\nVerified by independent replay before publishing.`,
+        message: `${prTitle}\n\nGhostLayer repair for: ${finding.title}\n${(verification.checks as { cached?: unknown } | null)?.cached ? "Original failure re-proven live; build, tests and patched replays reused from a prior verified run on identical code + patch." : "Verified by independent replay before publishing."}`,
         tree: newTree.sha,
         parents: [baseSha],
       });
@@ -115,7 +115,7 @@ function buildBody(repair: RepairForBody, branch: string) {
   const repro = f.reproductionSteps as unknown as { human?: string[]; trail?: Step[]; trigger?: Step };
   const stats = f.reproductionStats as { triggerRuns?: number; triggerFailures?: number; controlRuns?: number; controlFailures?: number } | null;
   const v = repair.verification!;
-  const vchecks = (v.checks as { checks?: { name: string; passed: boolean | null; detail: string }[]; verdict?: { concerns?: string[] } } | null) ?? {};
+  const vchecks = (v.checks as { checks?: { name: string; passed: boolean | null; detail: string }[]; verdict?: { concerns?: string[] }; cached?: { verifiedAt: string; treeSha: string; diffHash: string } | null } | null) ?? {};
   const tests = (repair.testSummary as { name: string; command: string; exitCode: number }[] | null) ?? [];
   const app = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const steps = repro.human?.length ? repro.human : [...(repro.trail ?? []), ...(repro.trigger ? [repro.trigger] : [])].map(describeStep);
@@ -147,20 +147,21 @@ ${repair.patchSummary ?? ""}
 ${((repair.files ?? []) as { path: string }[]).map((x) => `- \`${x.path}\``).join("\n")}
 
 ### Verification (actual results)
-Engineer sandbox checks:
-${tests.map((t) => `- \`${t.command}\` → exit ${t.exitCode}`).join("\n") || "- none available"}
+${tests.length || !vchecks.cached ? "Engineer sandbox checks:" : "Engineer: patch recalled from verified-fix memory (no new sandbox run)."}
+${tests.map((t) => `- \`${t.command}\` → exit ${t.exitCode}`).join("\n") || (vchecks.cached ? "" : "- none available")}
 
-Independent Verifier (fresh sandbox rebuilt from base commit + this diff, fresh browser session):
+${vchecks.cached ? `Independent Verifier: the original failure was re-proven live in a fresh browser for this PR. Build, tests and patched-build replays (♻) are reused from the verified run at ${new Date(vchecks.cached.verifiedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", dateStyle: "medium", timeStyle: "short" })} PT on identical code (tree \`${vchecks.cached.treeSha.slice(0, 7)}\`) and an identical patch (\`${vchecks.cached.diffHash.slice(0, 7)}\`):` : "Independent Verifier (fresh sandbox rebuilt from base commit + this diff, fresh browser session):"}
 ${(vchecks.checks ?? []).map((c) => `- ${check(c.passed)} — **${c.name}**: ${c.detail}`).join("\n")}
 
 | Check | Result |
 |---|---|
-| Build | ${check(v.buildPassed)} |
-| Existing tests | ${check(v.existingTestsPassed)} |
+| Build | ${check(v.buildPassed)}${vchecks.cached ? " ♻" : ""} |
+| Existing tests | ${check(v.existingTestsPassed)}${vchecks.cached ? " ♻" : ""} |
 | Original failure reproduced before fix | ${check(v.originalFailureReproduced)} |
-| Original failure resolved after fix | ${check(v.patchedFlowPassed)} |
-| Normal journey still works | ${check(v.regressionTestsPassed)} |
+| Original failure resolved after fix | ${check(v.patchedFlowPassed)}${vchecks.cached ? " ♻" : ""} |
+| Normal journey still works | ${check(v.regressionTestsPassed)}${vchecks.cached ? " ♻" : ""} |
 | Human review required | ⚠️ yes |
+${vchecks.cached ? "\n♻ = reused from the prior verified run on identical code + identical patch.\n" : ""}
 
 ### Evidence
 ${app ? `- Finding, screenshots and session recordings: ${app}/dashboard/projects/${repair.projectId}/findings/${f.id}` : "- See the GhostLayer dashboard"}

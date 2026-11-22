@@ -86,6 +86,9 @@ async function gatherContext(sbx: Sbx, finding: Finding, repro: Repro) {
   const stats = finding.reproductionStats as { explorerObservation?: { mutations?: { path: string }[] } } | null;
   for (const m of stats?.explorerObservation?.mutations ?? []) add(m.path.split("?")[0]);
   if (repro.trigger.kind === "goto") add(repro.trigger.path);
+  // Runtime errors name the failing symbol: "Cannot read properties of undefined (reading 'track')", "x is not a function".
+  const errs = ((finding.reproductionStats as { explorerObservation?: { pageErrors?: string[]; consoleErrors?: string[] } } | null)?.explorerObservation?.pageErrors ?? []).concat(finding.actualBehavior ?? "");
+  for (const e of errs) for (const m of e.matchAll(/reading '([A-Za-z_$][\w$]{2,40})'|([A-Za-z_$][\w$.]{2,40}) is not a function|([A-Za-z_$][\w$]{2,40}) is not defined/g)) add((m[1] ?? m[2] ?? m[3]).split(".").pop());
   try {
     const p = new URL(finding.affectedUrl).pathname.split("/").filter(Boolean).pop();
     add(p);
@@ -101,6 +104,20 @@ async function gatherContext(sbx: Sbx, finding: Finding, repro: Repro) {
   const ranked = [...hits.entries()].filter(([f]) => !/\.(md|lock|json)$/.test(f)).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([f]) => f);
   const contents: { path: string; content: string }[] = [];
   for (const f of ranked) contents.push({ path: f, content: (await sbx.files.readText(`${REPO_DIR}/${f}`)).slice(0, 9000) });
+  // Follow local imports of the top candidates one level (the bug often lives in a helper they call).
+  const known = new Set(files.output.split("\n").map((l) => l.trim()));
+  const imported: string[] = [];
+  for (const c of contents.slice(0, 2)) {
+    for (const m of c.content.matchAll(/from\s+["'](@\/|\.{1,2}\/)([^"']+)["']/g)) {
+      const base = m[1] === "@/" ? `src/${m[2]}` : `${c.path.split("/").slice(0, -1).join("/")}/${m[1] === "./" ? "" : "../"}${m[2]}`.replace(/[^/]+\/\.\.\//g, "");
+      const hit = ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx"].map((x) => base + x).find((x) => known.has(x));
+      if (hit && !ranked.includes(hit) && !imported.includes(hit) && !/\.(test|spec)\./.test(hit)) imported.push(hit);
+    }
+  }
+  for (const f of imported.slice(0, 3)) {
+    contents.push({ path: f, content: (await sbx.files.readText(`${REPO_DIR}/${f}`)).slice(0, 6000) });
+    ranked.push(f);
+  }
   // Show one existing test so new tests match conventions.
   const testFile = files.output.split("\n").find((f) => /\.(test|spec)\.(t|j)sx?$/.test(f));
   if (testFile && !ranked.includes(testFile))
@@ -237,7 +254,7 @@ export async function runRepair(repairId: string) {
   /** Bounded repair loop across jobs: queue another Engineer attempt with the evidence, or give up. */
   const retryOrReject = async (feedback: string) => {
     if (attempt < maxAttempts) {
-      await db.repairAttempt.update({ where: { id: repairId }, data: { attempt: attempt + 1, status: "QUEUED", meta: { ...meta, feedback } as Prisma.InputJsonValue } });
+      await db.repairAttempt.update({ where: { id: repairId }, data: { attempt: attempt + 1, status: "QUEUED", meta: { ...meta, feedback, recalledFrom: undefined, treeSha: undefined } as Prisma.InputJsonValue } });
       await emit(scope, null, "repair.retry", `Sending the evidence back to the Engineer for attempt ${attempt + 1} of ${maxAttempts}`);
       await enqueue("REPAIR", repairId, `repair:${repairId}:${attempt + 1}`);
       return;
@@ -410,7 +427,7 @@ Never include secrets. Never weaken validation.`,
         files: changed as unknown as Prisma.InputJsonValue,
         patchSummary: plan!.summary,
         rootCause: plan!.rootCause,
-        meta: { ...meta, feedback: null, prTitle: plan!.prTitle, branchSlug: plan!.branchSlug } as Prisma.InputJsonValue,
+        meta: { ...meta, feedback: null, prTitle: plan!.prTitle, branchSlug: plan!.branchSlug, recalledFrom: undefined, treeSha: undefined } as Prisma.InputJsonValue,
       },
     });
     await enqueue("VERIFY", repairId, `verify:${repairId}:${attempt}`);
@@ -437,7 +454,7 @@ export async function runVerify(repairId: string) {
   let verifierFeedback: string | null = null;
   const retryOrReject = async (feedback: string) => {
     if (attempt < maxAttempts) {
-      await db.repairAttempt.update({ where: { id: repairId }, data: { attempt: attempt + 1, status: "QUEUED", meta: { ...meta, feedback } as Prisma.InputJsonValue } });
+      await db.repairAttempt.update({ where: { id: repairId }, data: { attempt: attempt + 1, status: "QUEUED", meta: { ...meta, feedback, recalledFrom: undefined, treeSha: undefined } as Prisma.InputJsonValue } });
       await emit(scope, null, "repair.retry", `Sending the Verifier's evidence back to the Engineer for attempt ${attempt + 1} of ${maxAttempts}`);
       await enqueue("REPAIR", repairId, `repair:${repairId}:${attempt + 1}`);
       return;
@@ -472,11 +489,13 @@ export async function runVerify(repairId: string) {
         await browser.close();
         browser = null;
         const when = new Date(cached.verifiedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
-        const tag = `cached: identical tree ${mem.treeSha.slice(0, 7)} + identical patch ${mem.diffHash.slice(0, 7)}, verified ${when} PT`;
-        for (const c of cached.checks.filter((c) => !/Original failure reproduced/.test(c.name)))
-          await record(c.name, c.passed, `${c.detail} (${tag})`, { cached: true });
+        const tag = `reused from verified run ${when} PT (identical tree ${mem.treeSha.slice(0, 7)} + identical patch ${mem.diffHash.slice(0, 7)})`;
+        for (const c of cached.checks.filter((c) => !/Original failure reproduced/.test(c.name))) {
+          const detail = /Patch applies cleanly/.test(c.name) ? `${baseSha.slice(0, 7)} (tree ${mem.treeSha.slice(0, 7)}) + ${changed.length} file(s)` : c.detail;
+          await record(c.name, c.passed, `♻ ${tag} — ${detail}`, { cached: true });
+        }
         const afterShot = cached.afterShotJpeg
-          ? await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "after (patched build, from verified run)", mimeType: "image/jpeg", content: Buffer.from(cached.afterShotJpeg, "base64") })
+          ? await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "after", mimeType: "image/jpeg", content: Buffer.from(cached.afterShotJpeg, "base64") })
           : undefined;
         const state: VerifyState = { agentRunId: ver.id, checks, beforeFailed: beforeEx.failed, beforeShot, testsOk: cached.testsOk, buildOk: cached.buildOk };
         return await finalizeVerification({
@@ -486,8 +505,11 @@ export async function runVerify(repairId: string) {
           regressionOk: cached.regressionOk,
           afterShot,
           retryOrReject,
-          cachedVerdict: (cached.verdict as z.infer<typeof VerdictSchema> | null) ?? { recommendation: "approve", concerns: [], adversarialIdeas: [], reasoning: "cached" } as unknown as z.infer<typeof VerdictSchema>,
+          fromMemory: { verdict: (cached.verdict as z.infer<typeof VerdictSchema> | null) ?? null, verifiedAt: cached.verifiedAt, when, treeSha: mem.treeSha, diffHash: mem.diffHash, memoryId: mem.id },
         });
+      } catch (err) {
+        await finishAgentRun(ver.id, "FAILED", undefined, String((err as Error).message ?? err).slice(0, 300));
+        throw err;
       } finally {
         await browser?.close();
       }
@@ -613,7 +635,7 @@ export async function runVerifyReplay(repairId: string) {
   const attempt = repair.attempt;
   const retryOrReject = async (feedback: string) => {
     if (attempt < maxAttempts) {
-      await db.repairAttempt.update({ where: { id: repairId }, data: { attempt: attempt + 1, status: "QUEUED", meta: { ...meta, verify: undefined, feedback } as Prisma.InputJsonValue } });
+      await db.repairAttempt.update({ where: { id: repairId }, data: { attempt: attempt + 1, status: "QUEUED", meta: { ...meta, verify: undefined, feedback, recalledFrom: undefined, treeSha: undefined } as Prisma.InputJsonValue } });
       await emit(scope, null, "repair.retry", `Sending the Verifier's evidence back to the Engineer for attempt ${attempt + 1} of ${maxAttempts}`);
       await enqueue("REPAIR", repairId, `repair:${repairId}:${attempt + 1}`);
       return;
@@ -646,7 +668,9 @@ export async function runVerifyReplay(repairId: string) {
     const replay = async (step: Step) => {
       // A journey that could not complete is inconclusive, not a verdict: retry once.
       let r = await replayOnce(browser!, previewUrl.origin, repro.trail, step, undefined, { bootstrapUrl, intercept: false });
-      if (r.preError || r.obs.error) r = await replayOnce(browser!, previewUrl.origin, repro.trail, step, undefined, { bootstrapUrl, intercept: false });
+      // A preview auth hiccup (401/403 from the Solari preview gateway) says nothing about the patch: retry.
+      for (let i = 0; i < 2 && (r.preError || r.obs.error || [401, 403].includes(r.obs.navigationStatus ?? 0)); i++)
+        r = await replayOnce(browser!, previewUrl.origin, repro.trail, step, undefined, { bootstrapUrl, intercept: false });
       return r;
     };
     const runs: (boolean | null)[] = [];
@@ -712,21 +736,23 @@ async function finalizeVerification(args: {
   regressionOk: boolean | null;
   afterShot: string | undefined;
   retryOrReject: (feedback: string) => Promise<void>;
-  /** Verdict reused from the verified-fix memory (identical tree + identical diff); skips the LLM review. */
-  cachedVerdict?: z.infer<typeof VerdictSchema> | null;
+  /** Results reused from the verified-fix memory (identical tree + identical diff): skips the LLM review. */
+  fromMemory?: { verdict: z.infer<typeof VerdictSchema> | null; verifiedAt: string; when: string; treeSha: string; diffHash: string; memoryId: string };
 }) {
-  const { repair, state, patchedOk, regressionOk, afterShot, retryOrReject, cachedVerdict } = args;
+  const { repair, state, patchedOk, regressionOk, afterShot, retryOrReject, fromMemory } = args;
+  const cachedVerdict = fromMemory?.verdict ?? null;
   const { finding } = repair;
   const repairId = repair.id;
   const scope = { repairAttemptId: repairId, scanId: finding.scanId };
   const meta = (repair.meta ?? {}) as RepairMeta;
   const checks = state.checks;
-  let verdict: z.infer<typeof VerdictSchema> | null = cachedVerdict ?? null;
-  if (cachedVerdict)
-    await emit(scope, "VERIFIER", "review.completed", `Adversarial review (cached for this exact diff): ${cachedVerdict.recommendation}${cachedVerdict.concerns.length ? ` — ${cachedVerdict.concerns[0]}` : " — no concrete defects found"}`, {
+  let verdict: z.infer<typeof VerdictSchema> | null = cachedVerdict;
+  if (fromMemory && cachedVerdict)
+    await emit(scope, "VERIFIER", "review.completed", `Adversarial review (reused for this exact diff): ${cachedVerdict.recommendation}${cachedVerdict.concerns.length ? ` — ${cachedVerdict.concerns[0]}` : " — no concrete defects found"}`, {
       concerns: cachedVerdict.concerns,
       cached: true,
     });
+  else if (fromMemory) await emit(scope, "VERIFIER", "review.unavailable", "AI review was unavailable on the verified run being reused");
   else try {
     verdict = await structured({
       name: "verifier_review",
@@ -755,10 +781,12 @@ Look for: race conditions still possible, guards that never reset (control stuck
       regressionTestsPassed: regressionOk,
       humanReviewRequired: true,
       approved,
-      verifierSummary: approved
+      verifierSummary: approved && fromMemory
+        ? `The original failure was re-proven live just now on the unpatched site. Build, tests and patched-build replays are reused from the verified run at ${fromMemory.when} PT for the identical code (tree ${fromMemory.treeSha.slice(0, 7)}) and identical patch (${fromMemory.diffHash.slice(0, 7)}). ${verdict?.concerns.length ? `Open concerns: ${verdict.concerns.join("; ")}` : ""}`.trim()
+        : approved
         ? `The original failure reproduced on the unpatched site and did not occur in the patched build's replays (incl. triple-click). Tests and build passed in an independent sandbox. ${verdict?.concerns.length ? `Open concerns: ${verdict.concerns.join("; ")}` : ""}`.trim()
         : `Rejected: ${checks.filter((c) => c.passed === false).map((c) => c.name).join(", ") || verdict?.reasoning || "verification incomplete"}`,
-      checks: { checks, verdict } as unknown as Prisma.InputJsonValue,
+      checks: { checks, verdict, cached: fromMemory ? { verifiedAt: fromMemory.verifiedAt, treeSha: fromMemory.treeSha, diffHash: fromMemory.diffHash, memoryId: fromMemory.memoryId } : null } as unknown as Prisma.InputJsonValue,
       evidenceReferences: [state.beforeShot, afterShot].filter(Boolean) as string[],
       completedAt: new Date(),
     },
@@ -769,7 +797,7 @@ Look for: race conditions still possible, guards that never reset (control stuck
     await setStatus(repairId, "READY_FOR_REVIEW", { completedAt: new Date(), branchName: `ghostlayer/fix-${slug}` });
     await db.finding.update({ where: { id: finding.id }, data: { verificationStatus: "FIX_VERIFIED" } });
     // Remember the verified fix (only fully re-verified runs are written; cached runs just reuse the entry).
-    if (!cachedVerdict && repair.project.repositoryFullName && repair.project.githubInstallationId && repair.baseSha && repair.diff)
+    if (!fromMemory && repair.project.repositoryFullName && repair.project.githubInstallationId && repair.baseSha && repair.diff)
       try {
         const treeSha = meta.treeSha ?? (await treeOf(repair.project.githubInstallationId, repair.project.repositoryFullName, repair.baseSha));
         await saveFix({

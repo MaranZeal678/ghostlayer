@@ -41,7 +41,7 @@ export function Hero() {
 
       <motion.div
         style={reduce ? undefined : { opacity: fade, y: lift }}
-        className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-20 pt-14 sm:px-8 md:pt-20 lg:grid-cols-[1.1fr_0.9fr] lg:gap-10 lg:pt-24"
+        className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-14 sm:px-8 md:pt-20 lg:grid-cols-[1.1fr_0.9fr] lg:gap-10 lg:pt-24"
       >
         <div>
           <motion.p
@@ -103,7 +103,7 @@ export function Hero() {
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 1, delay: 0.8 }}
-            className="mt-8 font-mono text-[11px] uppercase tracking-[0.16em] text-faint"
+            className="mt-8 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-faint"
           >
             Find what hides beneath the interface.
           </motion.p>

@@ -39,6 +39,14 @@ export async function reapStaleJobs(olderThanMinutes = 20) {
   await db.job.updateMany({ where: { id: { in: stale.map((j) => j.id) } }, data: { status: "FAILED", lastError: msg } });
   const ids = (k: string) => stale.filter((j) => j.kind === k).map((j) => j.targetId);
   await db.scan.updateMany({
+    where: { id: { in: ids("INVESTIGATE") }, status: "INVESTIGATING" },
+    data: { status: "PARTIALLY_COMPLETED", errorMessage: msg, completedAt: new Date() },
+  });
+  await db.repairAttempt.updateMany({
+    where: { id: { in: [...ids("VERIFY"), ...ids("VERIFY_REPLAY")] }, status: "VERIFYING" },
+    data: { status: "FAILED", errorMessage: msg, completedAt: new Date() },
+  });
+  await db.scan.updateMany({
     where: { id: { in: ids("SCAN") }, status: { in: ["QUEUED", "INITIALIZING", "EXPLORING", "INVESTIGATING"] } },
     data: { status: "FAILED", errorMessage: msg, completedAt: new Date() },
   });

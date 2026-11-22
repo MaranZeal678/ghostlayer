@@ -371,6 +371,7 @@ export async function openSolariBrowser(meta: Record<string, string>): Promise<B
     console.warn(`[browser] concurrency limit hit; released ${n} stale GhostLayer session(s), retrying`);
     // Parallel repairs share a small browser quota: wait for a slot (up to ~2 min) instead of failing.
     for (let i = 0; ; i++) {
+      if (i > 0 && i % 10 === 0) await reclaimStaleBrowsers().catch(() => 0);
       await new Promise((r) => setTimeout(r, 3000));
       try {
         session = await create();

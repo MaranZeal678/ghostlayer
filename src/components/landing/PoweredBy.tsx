@@ -9,9 +9,9 @@ const STACK = [
 
 export function PoweredBy() {
   return (
-    <section aria-labelledby="powered-title" className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
+    <section aria-labelledby="powered-title" className="mx-auto max-w-7xl px-5 py-20 sm:px-8">
       <Reveal>
-        <h2 id="powered-title" className="text-center font-mono text-[11px] uppercase tracking-[0.18em] text-faint">
+        <h2 id="powered-title" className="text-center font-mono text-[0.6875rem] uppercase tracking-[0.18em] text-faint">
           Powered by
         </h2>
       </Reveal>
@@ -21,7 +21,7 @@ export function PoweredBy() {
             <div className="flex h-full items-start gap-4 bg-surface/30 p-6">
               <s.icon className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden />
               <div>
-                <p className="text-[15px] font-semibold tracking-tight text-ink">{s.name}</p>
+                <p className="text-[0.9375rem] font-semibold tracking-tight text-ink">{s.name}</p>
                 <p className="mt-1 text-sm leading-relaxed text-muted">{s.role}</p>
               </div>
             </div>

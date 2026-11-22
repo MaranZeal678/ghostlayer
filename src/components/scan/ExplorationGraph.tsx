@@ -53,7 +53,7 @@ export function ExplorationGraph({ nodes, edges, activePath }: { nodes: GNode[];
           <g key={e.id}>
             <motion.path d={d} fill="none" stroke={e.status === "anomaly" ? "#FB7185" : "rgba(196,181,253,0.35)"} strokeWidth={e.status === "anomaly" ? 2 : 1.2} strokeDasharray={e.kind === "link" ? "0" : "4 4"} markerEnd="url(#arrow)" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.8 }} />
             {e.status === "anomaly" && (
-              <text x={self ? a.x : (a.x + b.x) / 2} y={self ? a.y - 62 : (a.y + b.y) / 2 - 6} textAnchor="middle" className="fill-coral text-[10px]">
+              <text x={self ? a.x : (a.x + b.x) / 2} y={self ? a.y - 62 : (a.y + b.y) / 2 - 6} textAnchor="middle" className="fill-coral text-[0.625rem]">
                 {e.label.slice(0, 24)}
               </text>
             )}
@@ -69,8 +69,8 @@ export function ExplorationGraph({ nodes, edges, activePath }: { nodes: GNode[];
             {active && <motion.circle cx={p.x} cy={p.y} r={26} fill="none" stroke="#C4B5FD" strokeWidth={1.5} animate={{ r: [18, 30], opacity: [0.8, 0] }} transition={{ duration: 1.4, repeat: Infinity }} />}
             <circle cx={p.x} cy={p.y} r={14} fill="#111321" stroke={color} strokeWidth={2} />
             <circle cx={p.x} cy={p.y} r={5} fill={color} />
-            <text x={p.x} y={p.y + 30} textAnchor="middle" className="fill-ink font-mono text-[11px]">{n.path.length > 22 ? `${n.path.slice(0, 21)}…` : n.path}</text>
-            {n.httpStatus && n.httpStatus >= 400 && <text x={p.x} y={p.y + 43} textAnchor="middle" className="fill-amber font-mono text-[10px]">HTTP {n.httpStatus}</text>}
+            <text x={p.x} y={p.y + 30} textAnchor="middle" className="fill-ink font-mono text-[0.6875rem]">{n.path.length > 22 ? `${n.path.slice(0, 21)}…` : n.path}</text>
+            {n.httpStatus && n.httpStatus >= 400 && <text x={p.x} y={p.y + 43} textAnchor="middle" className="fill-amber font-mono text-[0.625rem]">HTTP {n.httpStatus}</text>}
           </motion.g>
         );
       })}

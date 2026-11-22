@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 export function DiffView({ diff }: { diff: string }) {
   const lines = diff.split("\n");
   return (
-    <pre className="max-h-[520px] overflow-auto rounded-xl border border-line bg-[#0b0c16] p-0 font-mono text-[12px] leading-5">
+    <pre className="max-h-[520px] overflow-auto rounded-xl border border-line bg-[#0b0c16] p-0 font-mono text-[0.75rem] leading-5">
       {lines.map((l, i) => (
         <div
           key={i}

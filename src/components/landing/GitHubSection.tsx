@@ -27,7 +27,7 @@ const RULES = [
 export function GitHubSection() {
   return (
     <section aria-labelledby="github-title" className="relative border-y border-line bg-surface/20">
-      <div className="mx-auto max-w-6xl px-5 py-24 sm:px-8 md:py-32">
+      <div className="mx-auto max-w-7xl px-5 py-24 sm:px-8 md:py-32">
         <SectionHeading
           id="github-title"
           eyebrow="GitHub integration"
@@ -43,7 +43,7 @@ export function GitHubSection() {
             <Reveal key={r.title} delay={i * 0.06} className="h-full">
               <div className="h-full rounded-2xl border border-line bg-bg/50 p-6 transition-colors hover:border-line-strong">
                 <r.icon className="h-5 w-5 text-lavender" aria-hidden />
-                <h3 className="mt-5 text-[15px] font-medium text-ink">{r.title}</h3>
+                <h3 className="mt-5 text-[0.9375rem] font-medium text-ink">{r.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-muted">{r.body}</p>
               </div>
             </Reveal>

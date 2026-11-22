@@ -47,7 +47,7 @@ export function FinalCta() {
 export function Footer() {
   return (
     <footer className="border-t border-line">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 py-8 text-sm text-faint sm:flex-row sm:px-8">
+      <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-5 py-8 text-sm text-faint sm:flex-row sm:px-8">
         <Wordmark />
         <p className="font-display text-base italic text-muted">Find what hides beneath the interface.</p>
         <p>Built at Cutie Hack 2026</p>

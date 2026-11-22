@@ -91,7 +91,7 @@ export function Agents() {
 
   return (
     <section id="agents" aria-labelledby="agents-title" className="relative scroll-mt-20">
-      <div className="mx-auto max-w-6xl px-5 py-24 sm:px-8 md:py-32">
+      <div className="mx-auto max-w-7xl px-5 py-24 sm:px-8 md:py-32">
         <SectionHeading
           id="agents-title"
           eyebrow="Meet the agents"
@@ -106,8 +106,8 @@ export function Agents() {
         <div className="mt-12 grid gap-6 lg:grid-cols-[1.25fr_1fr]">
           <Reveal className="glass relative overflow-hidden rounded-2xl">
             <div className="flex items-center justify-between border-b border-line px-5 py-3">
-              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">Agent network</p>
-              <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted">
+              <p className="font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-faint">Agent network</p>
+              <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-wider text-muted">
                 Demo simulation
               </span>
             </div>
@@ -120,7 +120,7 @@ export function Agents() {
                 height={360}
               />
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-5 py-3 text-[11px] text-faint">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-5 py-3 text-[0.6875rem] text-faint">
               {[
                 ["bg-faint", "Idle"],
                 ["bg-lavender", "Running"],
@@ -163,7 +163,7 @@ export function Agents() {
                           <a.icon className="h-4 w-4" aria-hidden />
                         </span>
                         <span className="min-w-0">
-                          <span className="block text-[15px] font-medium text-ink">{a.name}</span>
+                          <span className="block text-[0.9375rem] font-medium text-ink">{a.name}</span>
                           <span className="block text-sm text-muted">{a.role}</span>
                           {on && <span className="mt-2 block text-sm leading-relaxed text-ink/80">{a.detail}</span>}
                         </span>

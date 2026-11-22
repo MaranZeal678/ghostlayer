@@ -73,7 +73,7 @@ export async function runScan(scanId: string) {
   const startPath = target.pathname + target.search || "/";
 
   const maxActions = Math.min(project.maxActions, Number(process.env.SCAN_MAX_ACTIONS ?? 40));
-  const deadline = Date.now() + Number(process.env.SCAN_MAX_MINUTES ?? 6) * 60_000;
+  const deadline = Date.now() + Number(process.env.SCAN_MAX_MINUTES ?? 3.5) * 60_000;
 
   // ── Explorer ──────────────────────────────────────────────
   const explorerRun = await startAgentRun(scope, "EXPLORER", `Explore ${origin} with no bug list (budget: ${maxActions} actions)`);
@@ -183,7 +183,7 @@ export async function runInvestigate(scanId: string) {
         const repro = await reproduce(invSession!, origin, a, {
           saveScreenshot: saveShot,
           onRun: (r) =>
-            emit({ ...scope, agentRunId: invRun.id }, "INVESTIGATOR", "repro.run", `${r.variant === "trigger" ? "Trigger" : "Control"} #${r.attempt}: ${r.failed ? "FAILURE" : "ok"} — ${r.detail}`, {
+            emit({ ...scope, agentRunId: invRun.id }, "INVESTIGATOR", "repro.run", `[${a.kind === "broken_navigation" ? a.pagePath : a.summary.slice(0, 36)}] ${r.variant === "trigger" ? "Trigger" : "Control"} #${r.attempt}: ${r.failed ? "FAILURE" : "ok"} — ${r.detail}`, {
               variant: r.variant,
               failed: r.failed,
               evidenceId: r.screenshotId,
@@ -265,9 +265,13 @@ export async function runInvestigate(scanId: string) {
         });
       };
       const queue = [...signals];
-      const width = Math.max(1, Number(process.env.INVESTIGATE_CONCURRENCY ?? 3));
+      const width = Math.max(1, Number(process.env.INVESTIGATE_CONCURRENCY ?? 2));
       await Promise.all(Array.from({ length: Math.min(width, queue.length) }, async () => {
-        for (let a = queue.shift(); a; a = queue.shift()) await investigateOne(a);
+        for (let a = queue.shift(); a; a = queue.shift())
+          await investigateOne(a).catch(async (err) => {
+            // One signal failing must not close the shared browser under the other lanes.
+            await emit({ ...scope, agentRunId: invRun.id }, "INVESTIGATOR", "repro.error", `Could not investigate "${a!.summary.slice(0, 60)}": ${String((err as Error).message ?? err).slice(0, 120)}`).catch(() => {});
+          });
       }));
       await finishAgentRun(invRun.id, "COMPLETED", `${findingsCount} finding(s) confirmed or reproduced`);
     } catch (err) {
