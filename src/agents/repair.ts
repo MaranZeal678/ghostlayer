@@ -282,6 +282,7 @@ export async function runRepair(repairId: string) {
 Rules: targeted change only; keep existing style; no unrelated refactors; do not touch lockfiles or config unless required.
 Edits are exact search/replace on current file contents; each "search" must appear EXACTLY ONCE in that file.
 ${ctx.contents.some((c) => /\.(test|spec)\./.test(c.path)) ? "Add one focused regression test in the repo's existing test framework that fails without the fix and passes with it." : "Add a regression test only if a test framework exists."}
+For broken links (HTTP 404 navigation), either point the link at the existing route it clearly intends, or add the missing page if the link is a real feature; never leave a link that still 404s. The Verifier will open the source page and follow every link to that path.
 For duplicate-submission bugs, a robust fix guards re-entry synchronously (e.g. a ref-based in-flight guard checked before any await) AND reflects pending state in the UI (disable the control) — React state alone can race with rapid clicks.
 Never include secrets. Never weaken validation.`,
           user: JSON.stringify({
@@ -576,7 +577,9 @@ export async function runVerifyReplay(repairId: string) {
     const runs: (boolean | null)[] = [];
     let afterShot: string | undefined;
     // All patched replays and the control run concurrently in isolated contexts of one browser session.
-    const steps: Step[] = [1, 2, 3].map((i) => (repro.trigger.kind === "click" ? { ...repro.trigger, count: i === 3 ? 3 : repro.trigger.count } : repro.trigger));
+    const patchedTrigger: Step =
+      repro.kind === "broken_navigation" && repro.trigger.kind === "goto" && repro.trail.length ? { kind: "checkLinks", path: repro.trigger.path } : repro.trigger;
+    const steps: Step[] = [1, 2, 3].map((i) => (patchedTrigger.kind === "click" ? { ...patchedTrigger, count: i === 3 ? 3 : patchedTrigger.count } : patchedTrigger));
     const controlStep: Step = repro.control ?? { kind: "goto", path: repro.trail.find((s) => s.kind === "goto")?.path ?? "/" };
     const [r1, r2, r3, rc] = await Promise.all([...steps.map((s) => replay(s)), replay(controlStep)]);
     const results = [r1, r2, r3];
@@ -591,7 +594,7 @@ export async function runVerifyReplay(repairId: string) {
         : !ex.failed &&
           r.obs.pageErrors.length === 0 &&
           (repro.kind !== "duplicate_mutation" || okMutations === 1) &&
-          (repro.trigger.kind !== "goto" || ((r.obs.navigationStatus ?? 0) > 0 && (r.obs.navigationStatus ?? 0) < 400));
+          (!["goto", "checkLinks"].includes(patchedTrigger.kind) || ((r.obs.navigationStatus ?? 0) > 0 && (r.obs.navigationStatus ?? 0) < 400));
       runs.push(ok);
       if (!afterShot && ok && r.shot) afterShot = await saveEvidence({ repairAttemptId: repairId, findingId: finding.id, type: "SCREENSHOT", label: "after", mimeType: "image/jpeg", content: r.shot });
       await emit(

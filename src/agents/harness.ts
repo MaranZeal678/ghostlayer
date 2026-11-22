@@ -9,7 +9,9 @@ import { solariBrowsers } from "@/lib/solari";
 export type Step =
   | { kind: "goto"; path: string }
   | { kind: "click"; selector: string; label: string; count?: number }
-  | { kind: "fill"; selector: string; label: string; value: string };
+  | { kind: "fill"; selector: string; label: string; value: string }
+  /** Verify links on the current page that point at `path`: follow each; worst status wins. No such link = resolved. */
+  | { kind: "checkLinks"; path: string };
 
 export interface NetEvent {
   method: string;
@@ -120,6 +122,7 @@ export class PageHarness {
   consoleErrors: string[] = [];
   pageErrors: string[] = [];
   blockedNavigations: string[] = [];
+  lastCheckNote = "";
   private pending = 0;
   private t0 = Date.now();
 
@@ -249,6 +252,30 @@ export class PageHarness {
     try {
       if (step.kind === "goto") {
         navigationStatus = (await this.goto(step.path)).status;
+      } else if (step.kind === "checkLinks") {
+        const want = step.path.split("?")[0].replace(/\/$/, "") || "/";
+        const hrefs = ((await this.page.evaluate(
+          "Array.from(document.querySelectorAll('a[href]')).map(a => a.href)",
+        )) as string[]).filter((h) => {
+          try {
+            const u = new URL(h);
+            return u.origin === this.origin && (u.pathname.replace(/\/$/, "") || "/") === want;
+          } catch {
+            return false;
+          }
+        });
+        if (!hrefs.length) {
+          navigationStatus = 200; // the broken link is gone from the page
+          this.lastCheckNote = `no link to ${step.path} remains on the page`;
+        } else {
+          let worst = 0;
+          for (const h of [...new Set(hrefs)].slice(0, 3)) {
+            const st = (await this.goto(new URL(h).pathname + new URL(h).search)).status;
+            worst = Math.max(worst, st);
+          }
+          navigationStatus = worst;
+          this.lastCheckNote = `${hrefs.length} link(s) to ${step.path} → HTTP ${worst}`;
+        }
       } else if (step.kind === "fill") {
         await this.page.locator(step.selector).first().fill(step.value);
       } else {
@@ -368,6 +395,7 @@ export async function openSolariBrowser(meta: Record<string, string>): Promise<B
 /** Rebase helper: trails store paths, so a trail recorded on prod replays on a preview origin unchanged. */
 export function describeStep(s: Step) {
   if (s.kind === "goto") return `Navigate to ${s.path}`;
+  if (s.kind === "checkLinks") return `Follow every link to ${s.path} on the page`;
   if (s.kind === "fill") return `Type "${s.value}" into ${s.label}`;
   return s.count && s.count > 1 ? `Click "${s.label}" ${s.count}× rapidly` : `Click "${s.label}"`;
 }
