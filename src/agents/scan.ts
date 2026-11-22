@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { emit, finishAgentRun, startAgentRun } from "@/lib/events";
 import { assertSafeTarget } from "@/lib/url-safety";
 import { enqueue } from "@/lib/queue";
+import { currentCredentialSources } from "@/lib/credentials";
 import type { Prisma } from "@/generated/prisma/client";
 import { openSolariBrowser, describeStep } from "./harness";
 import { explore, type Anomaly } from "./explorer";
@@ -61,6 +62,8 @@ export async function runScan(scanId: string) {
     (await db.scan.updateMany({ where: { id: scanId, status: { not: "CANCELLED" } }, data: { status, ...extra } })).count > 0;
   if (!(await advance("INITIALIZING", { startedAt: new Date() }))) return;
   await emit(scope, null, "scan.initializing", `Down the rabbit hole: preparing to explore ${project.websiteUrl}`);
+  const src = currentCredentialSources();
+  await emit(scope, null, "scan.credentials", `Using ${src.openai === "user" ? "your" : "GhostLayer's default"} OpenAI key and ${src.solari === "user" ? "your" : "GhostLayer's default"} Solari key`);
 
   // Authorization + target safety (re-checked at run time, not only at project creation).
   if (!project.authorizedAt) throw new Error("The project owner has not confirmed authorization to test this website");

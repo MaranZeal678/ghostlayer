@@ -8,6 +8,14 @@ import { heartbeat } from "./queue";
 import type { Job } from "@/generated/prisma/client";
 
 export async function processJob(job: Job) {
+  // Run the whole job with the project owner's credentials (BYOK keys, else GhostLayer defaults).
+  const { credentialsForUser, ownerOfJobTarget, withCredentials } = await import("./credentials");
+  const owner = await ownerOfJobTarget(job.kind, job.targetId).catch(() => null);
+  const creds = owner ? await credentialsForUser(owner).catch(() => null) : null;
+  return withCredentials(creds ?? { source: { openai: "default", solari: "default" } }, () => runJob(job));
+}
+
+async function runJob(job: Job) {
   console.log(`[worker] ▶ ${job.kind} ${job.targetId}`);
   const beat = setInterval(() => void heartbeat(job.id), 60_000);
   try {

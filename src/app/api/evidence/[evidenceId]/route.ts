@@ -18,7 +18,9 @@ export const GET = handle(async (_req: Request, { params }: Ctx) => {
   if (ev.storageReference?.startsWith("solari-replay:")) {
     const sessionId = ev.storageReference.slice("solari-replay:".length);
     const { solariBrowsers } = await import("@/lib/solari");
-    const bytes = await solariBrowsers().sessions.downloadReplay(sessionId).catch(() => null);
+    const { credentialsForUser, withCredentials } = await import("@/lib/credentials");
+    // Recordings live under the Solari key that made them: the owner's own key if they set one, else the default.
+    const bytes = await withCredentials(await credentialsForUser(user.id), () => solariBrowsers().sessions.downloadReplay(sessionId)).catch(() => null);
     if (!bytes) throw new HttpError(404, "Replay not available yet (or expired)");
     return new Response(Buffer.from(bytes), { headers: { "content-type": "application/x-ndjson", "cache-control": "private, max-age=300" } });
   }

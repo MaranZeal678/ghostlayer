@@ -1,11 +1,16 @@
 import OpenAI from "openai";
 import { z } from "zod";
 
-let client: OpenAI | null = null;
+import { currentOpenAIKey } from "./credentials";
+
+const clients = new Map<string, OpenAI>();
+/** OpenAI client for the current job's credentials (user BYOK key, else the server key). */
 function openai() {
-  if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
-  client ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return client;
+  const apiKey = currentOpenAIKey();
+  if (!apiKey) throw new Error("No OpenAI API key configured (add one in Settings → API keys)");
+  let c = clients.get(apiKey);
+  if (!c) clients.set(apiKey, (c = new OpenAI({ apiKey })));
+  return c;
 }
 
 export const MODEL = () => process.env.OPENAI_MODEL || "gpt-5.5";

@@ -1,23 +1,29 @@
 import { Solari } from "@solarisdk/browser";
 import { SandboxClient } from "@solarisdk/sandbox";
+import { currentSolariKey } from "./credentials";
 
 const BASE_URL = "https://api.getsolari.com";
 
 function key() {
-  const k = process.env.SOLARI_API_KEY;
-  if (!k) throw new Error("SOLARI_API_KEY is not configured");
+  const k = currentSolariKey();
+  if (!k) throw new Error("No Solari API key configured (add one in Settings → API keys)");
   return k;
 }
 
-let browsers: Solari | null = null;
-let sandboxes: SandboxClient | null = null;
+// Clients are cached per key so a job running with a user's own key never shares a client with another user.
+const browsers = new Map<string, Solari>();
+const sandboxes = new Map<string, SandboxClient>();
 
 export function solariBrowsers() {
-  browsers ??= new Solari({ apiKey: key(), baseUrl: BASE_URL });
-  return browsers;
+  const k = key();
+  let c = browsers.get(k);
+  if (!c) browsers.set(k, (c = new Solari({ apiKey: k, baseUrl: BASE_URL })));
+  return c;
 }
 
 export function solariSandboxes() {
-  sandboxes ??= new SandboxClient({ apiKey: key(), baseUrl: BASE_URL });
-  return sandboxes;
+  const k = key();
+  let c = sandboxes.get(k);
+  if (!c) sandboxes.set(k, (c = new SandboxClient({ apiKey: k, baseUrl: BASE_URL })));
+  return c;
 }
