@@ -8,7 +8,7 @@ import { installationOctokit } from "./github";
  */
 export function demoConfig() {
   const repo = process.env.DEMO_REPOSITORY ?? "MaranZeal678/mad-hatter-tea-emporium";
-  const baselineSha = process.env.DEMO_BASELINE_SHA ?? "9cac922ca9054179085967e57802fd6526b065cc";
+  const baselineSha = process.env.DEMO_BASELINE_SHA ?? "a2ec9fb24a9f86801a21b07e9656ae0119064303";
   return { repo, baselineSha };
 }
 

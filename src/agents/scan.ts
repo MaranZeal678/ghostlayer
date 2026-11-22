@@ -164,7 +164,7 @@ export async function runInvestigate(scanId: string) {
     await db.scan.update({ where: { id: scanId }, data: { completedAt: new Date() } });
     return;
   }
-  const signals = [...result.anomalies].sort((a, b) => ANOMALY_PRIORITY[b.kind] - ANOMALY_PRIORITY[a.kind]).slice(0, 4);
+  const signals = [...result.anomalies].sort((a, b) => ANOMALY_PRIORITY[b.kind] - ANOMALY_PRIORITY[a.kind]).slice(0, 6);
   let findingsCount = 0;
   let investigatorFailed = false;
   if (signals.length) {
