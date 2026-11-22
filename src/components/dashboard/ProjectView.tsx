@@ -8,15 +8,16 @@ import { Badge, Button, Card, Stat, label, statusTone } from "@/components/ui/pr
 import { StartScanButton } from "./StartScanButton";
 import { FindingCard, type FindingLite } from "./FindingCard";
 import { RepoPicker, type Repo } from "./RepoPicker";
+import { DemoResetCard } from "./DemoResetCard";
 import { host, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-type Props = { project: any; scans: any[]; findings: (FindingLite & { repairs: { id: string; status: string }[] })[]; repairs: any[]; prs: any[] };
+type Props = { project: any; scans: any[]; findings: (FindingLite & { repairs: { id: string; status: string }[] })[]; repairs: any[]; prs: any[]; isDemo?: boolean };
 const TABS = ["Overview", "Findings", "Repairs", "Pull requests", "History", "Settings"] as const;
 const ACTIVE = ["QUEUED", "INITIALIZING", "EXPLORING", "INVESTIGATING"];
 
-export function ProjectView({ project, scans, findings, repairs, prs }: Props) {
+export function ProjectView({ project, scans, findings, repairs, prs, isDemo }: Props) {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
   const active = scans.find((s) => ACTIVE.includes(s.status));
   const latest = scans[0];
@@ -38,6 +39,8 @@ export function ProjectView({ project, scans, findings, repairs, prs }: Props) {
         </div>
         <StartScanButton projectId={project.id} disabled={project.status !== "ACTIVE"} />
       </header>
+
+      {isDemo && !active && <DemoResetCard projectId={project.id} repo={project.repositoryFullName} compact />}
 
       {active && (
         <Link href={`/dashboard/projects/${project.id}/scans/${active.id}`} className="glass glow-violet flex items-center gap-3 rounded-2xl px-5 py-4">

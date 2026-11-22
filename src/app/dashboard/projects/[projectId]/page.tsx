@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { pageUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ProjectView } from "@/components/dashboard/ProjectView";
+import { isDemoProject } from "@/lib/demo-reset";
 
 export const dynamic = "force-dynamic";
 
@@ -26,5 +27,5 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
   ]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ser = (x: unknown): any => JSON.parse(JSON.stringify(x, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
-  return <ProjectView project={ser(project)} scans={ser(scans)} findings={ser(findings)} repairs={ser(repairs)} prs={ser(prs)} />;
+  return <ProjectView project={ser(project)} scans={ser(scans)} findings={ser(findings)} repairs={ser(repairs)} prs={ser(prs)} isDemo={isDemoProject(project)} />;
 }
